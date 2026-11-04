@@ -20,8 +20,17 @@ uv run jobhunt import    # load jobs/companies/preferences from the Proficiently
 uv run jobhunt scan      # scan watchlist + known ATS boards (Greenhouse, Ashby, Lever)
 uv run jobhunt fit <id> | --all-new   # grade one job, or every 'new' job (keyword score always; Gemini score with a key)
 uv run jobhunt people <job_id>   # find likely hiring managers for a job
+uv run jobhunt status <id> applied --note "Referred by Sam"   # move a job to a pipeline stage
+uv run jobhunt pipeline [--all]   # jobs by stage (--all adds accepted/rejected/withdrawn)
 uv run jobhunt serve     # web UI at http://127.0.0.1:8000
 ```
+
+### Application pipeline
+
+Stages: `applied` → `screening` → `interviewing` → `offer`, closed as `accepted`, `rejected` or `withdrawn`.
+Change a job's stage on its page (with an optional note) or with `jobhunt status`. Every change is
+logged with its date; the job page shows the history and the **Pipeline** page shows a board.
+Grading, import and scan never move a job that is already in the pipeline.
 
 To start clean, delete `data/jobhunt.db`, then run `uv run jobhunt import && uv run jobhunt scan`.
 

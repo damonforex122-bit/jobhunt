@@ -215,3 +215,32 @@ def test_imported_fit_shows_blank_keyword_pct(settings):
     html = tc(webapp.create_app(settings)).get("/").text
     row = html[html.index("Evals Lead"):html.index("Researcher")]
     assert "<td>0</td>" not in row
+
+
+def test_post_status_with_note_shows_history(client):
+    r = client.post("/jobs/1/status", data={"status": "interviewing", "note": "Onsite Friday"})
+    assert r.status_code == 200
+    assert "Onsite Friday" in r.text and "History" in r.text
+
+
+def test_pipeline_board_lists_stage_columns_and_cards(client, settings):
+    conn = db.connect(settings.db_path)
+    db.set_job_status(conn, 1, "applied", note="via referral")
+    db.set_job_status(conn, 2, "offer")
+    conn.close()
+    r = client.get("/pipeline")
+    assert r.status_code == 200
+    for stage in ("applied", "screening", "interviewing", "offer", "rejected"):
+        assert stage in r.text
+    assert "Evals Lead" in r.text and "via referral" in r.text and "Researcher" in r.text
+    assert 'href="/pipeline"' in r.text
+
+
+def test_companies_open_count_excludes_pipeline_jobs(client, settings):
+    conn = db.connect(settings.db_path)
+    db.set_job_status(conn, 2, "interviewing")
+    conn.close()
+    r = client.get("/companies")
+    assert r.status_code == 200
+    row = r.text.split("Acme", 1)[1].split("</tr>", 1)[0]
+    assert ">0<" in row

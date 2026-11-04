@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import Company, Fit, Job, Person
+from .models import CLOSED, PIPELINE, Company, Fit, Job, Person
 from .urls import normalize_url
 
 SCHEMA = """
@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS people (
     confidence REAL NOT NULL,
     UNIQUE(company, name)
 );
+CREATE TABLE IF NOT EXISTS job_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    status TEXT NOT NULL,
+    note TEXT,
+    at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS job_events_job ON job_events(job_id);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -220,6 +228,46 @@ def list_people(conn: sqlite3.Connection, company: str) -> list[Person]:
     return [Person(**dict(r)) for r in rows]
 
 
-def set_job_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
+def set_job_status(conn: sqlite3.Connection, job_id: int, status: str,
+                   note: str | None = None) -> None:
+    """Set a job's status and log the change. Re-saving the same status logs only a note."""
+    note = (note or "").strip() or None
+    row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return
+    if row["status"] != status or note:
+        conn.execute("INSERT INTO job_events (job_id, status, note, at) VALUES (?, ?, ?, ?)",
+                     (job_id, status, note, _now()))
     conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
     conn.commit()
+
+
+def list_events(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    rows = conn.execute("SELECT status, note, at FROM job_events WHERE job_id = ? ORDER BY id",
+                        (job_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pipeline_board(conn: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Jobs in an application stage, grouped by stage, oldest in stage first."""
+    stages = PIPELINE + CLOSED
+    marks = ",".join("?" * len(stages))
+    rows = conn.execute(
+        f"""SELECT j.id, j.company, j.title, j.url, j.status, f.llm_score,
+               COALESCE((SELECT MIN(e.at) FROM job_events e
+                         WHERE e.job_id = j.id AND e.status = j.status
+                           AND NOT EXISTS (SELECT 1 FROM job_events l WHERE l.job_id = j.id
+                                           AND l.id > e.id AND l.status != j.status)),
+                        j.first_seen) AS stage_since,
+               (SELECT MIN(e.at) FROM job_events e
+                 WHERE e.job_id = j.id AND e.status = 'applied') AS applied_at,
+               (SELECT e.note FROM job_events e WHERE e.job_id = j.id AND e.note IS NOT NULL
+                 ORDER BY e.id DESC LIMIT 1) AS last_note
+           FROM jobs j LEFT JOIN fits f ON f.job_id = j.id
+           WHERE j.status IN ({marks}) ORDER BY stage_since, j.id""",
+        stages,
+    ).fetchall()
+    board: dict[str, list[dict]] = {s: [] for s in stages}
+    for r in rows:
+        board[r["status"]].append(dict(r))
+    return board

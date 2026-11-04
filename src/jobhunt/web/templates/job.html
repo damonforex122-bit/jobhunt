@@ -4,10 +4,15 @@
 {% if job.salary_min or job.salary_max %}<span class="badge">${{ job.salary_min or '?' }}&ndash;{{ job.salary_max or '?' }}</span>{% endif %}
 <a href="{{ job.url|safe_url }}" rel="noopener noreferrer">posting</a></p>
 <form method="post" action="/jobs/{{ job.id }}/status">
-  <select name="status" onchange="this.form.submit()">
-  {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == job.status }}>{{ s }}</option>{% endfor %}</select>
-  <noscript><button>Save</button></noscript>
+  <select name="status">
+  {% for group, items in [('Triage', triage), ('Pipeline', pipeline), ('Closed', closed)] %}<optgroup label="{{ group }}">
+  {% for s in items %}<option value="{{ s }}" {{ 'selected' if s == job.status }}>{{ s }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+  <input name="note" size="40" maxlength="1000" placeholder="Note (optional), e.g. Recruiter call Tue 2pm">
+  <button>Save</button>
 </form>
+{% if events %}<h2>History</h2><ul class="history">
+{% for e in events|reverse %}<li><span class="muted">{{ e.at[:10] }}</span> <b>{{ e.status }}</b>{% if e.note %} &mdash; {{ e.note }}{% endif %}</li>{% endfor %}
+</ul>{% endif %}
 {% include "_fit.html" %}
 {% include "_people.html" %}
 <h2>Posting</h2>

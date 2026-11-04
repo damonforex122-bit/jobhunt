@@ -61,3 +61,7 @@ def _register_serve(sub) -> None:
 
 
 REGISTRARS.append(_register_serve)
+
+from . import pipeline  # noqa: E402
+
+REGISTRARS.append(pipeline.register)

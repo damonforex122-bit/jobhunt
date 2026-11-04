@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h1>Pipeline</h1>
+<p class="muted">Move a job here by setting its status on the job page, or with <code>jobhunt status &lt;id&gt; applied</code>.</p>
+<div class="board">
+{% for stage in pipeline %}<div class="col"><h3>{{ stage }} ({{ board[stage]|length }})</h3>
+{% for j in board[stage] %}<div class="card"><div class="co">{{ j.company }}</div>
+<a href="/jobs/{{ j.id }}">{{ j.title }}</a>
+<div class="muted">in stage since {{ (j.stage_since or '')[:10] }}{% if j.applied_at and stage != 'applied' %} &middot; applied {{ j.applied_at[:10] }}{% endif %}{% if j.llm_score is not none %} &middot; fit {{ j.llm_score }}{% endif %}</div>
+{% if j.last_note %}<div>{{ j.last_note }}</div>{% endif %}</div>
+{% else %}<div class="muted">None yet</div>{% endfor %}</div>{% endfor %}
+</div>
+<h2>Closed</h2>
+<p class="muted">{% for stage in closed %}{{ stage }} {{ board[stage]|length }}{{ " · " if not loop.last }}{% endfor %}</p>
+<table><tr><th>Outcome</th><th>Company</th><th>Title</th><th>Date</th><th>Note</th></tr>
+{% for stage in closed %}{% for j in board[stage] %}<tr><td>{{ stage }}</td><td>{{ j.company }}</td>
+<td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ (j.stage_since or '')[:10] }}</td><td>{{ j.last_note or '' }}</td></tr>{% endfor %}{% endfor %}
+{% if not (board.accepted or board.rejected or board.withdrawn) %}<tr><td colspan="5" class="muted">Nothing closed yet.</td></tr>{% endif %}
+</table>{% endblock %}

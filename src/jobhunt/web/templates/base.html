@@ -11,8 +11,15 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.35rem .
 .chip{display:inline-block;background:#e8eefc;border-radius:10px;padding:0 .5rem;margin:.1rem;font-size:12px}
 .err{color:#c00}.posting{white-space:pre-wrap;background:#fafafa;padding:.8rem;border:1px solid #eee}
 .pair{margin:.4rem 0}.pair .o{color:#888}
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem}
+.col{background:#f6f6f8;border-radius:6px;padding:.5rem;min-height:4rem}
+.col h3{margin:.2rem 0 .5rem;font-size:13px;text-transform:capitalize}
+.card{background:#fff;border:1px solid #e3e3e8;border-radius:5px;padding:.45rem .55rem;margin-bottom:.45rem}
+.card .co{font-weight:600}.muted{color:#888;font-size:12px}
+.history li{margin:.2rem 0}
+@media (max-width:760px){.board{grid-template-columns:1fr}}
 </style></head><body>
-<nav><a href="/">Jobs</a><a href="/companies">Companies</a></nav>
+<nav><a href="/">Jobs</a><a href="/pipeline">Pipeline</a><a href="/companies">Companies</a></nav>
 {% for b in banner %}<div class="banner">{{ b }}</div>{% endfor %}
 {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
 {% block body %}{% endblock %}

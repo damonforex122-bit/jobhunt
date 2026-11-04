@@ -15,9 +15,9 @@ from fastapi.templating import Jinja2Templates
 from .. import db, importer, scan
 from ..config import Settings, short_error
 from ..fit import grade_job
+from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE
 from ..people.finder import find_people
 
-STATUSES = ("new", "ready", "needs", "low", "applied", "skip")
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
@@ -121,7 +121,8 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: int, conn: Conn):
         job = job_or_404(conn, job_id)
-        return render(request, "job.html", statuses=STATUSES, **panel_ctx(conn, job))
+        return render(request, "job.html", triage=TRIAGE, pipeline=PIPELINE, closed=CLOSED,
+                      events=db.list_events(conn, job_id), **panel_ctx(conn, job))
 
     @app.post("/jobs/{job_id}/fit", response_class=HTMLResponse)
     def post_fit(request: Request, job_id: int, conn: Conn,
@@ -144,18 +145,24 @@ def create_app(settings: Settings) -> FastAPI:
                       **panel_ctx(conn, job, people_error=error, skipped=skipped))
 
     @app.post("/jobs/{job_id}/status")
-    def post_status(job_id: int, conn: Conn, status: Annotated[str, Form()]):
+    def post_status(job_id: int, conn: Conn, status: Annotated[str, Form()],
+                    note: Annotated[str, Form()] = ""):
         if status not in STATUSES:
             raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
         job_or_404(conn, job_id)
-        db.set_job_status(conn, job_id, status)
+        db.set_job_status(conn, job_id, status, note=note[:1000])
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.get("/pipeline", response_class=HTMLResponse)
+    def pipeline_page(request: Request, conn: Conn):
+        return render(request, "pipeline.html", board=db.pipeline_board(conn),
+                      pipeline=PIPELINE, closed=CLOSED)
 
     @app.get("/companies", response_class=HTMLResponse)
     def companies(request: Request, conn: Conn):
         counts = {r[0]: r[1] for r in conn.execute(
-            "SELECT company, COUNT(*) FROM jobs WHERE status NOT IN ('skip', 'applied') "
-            "GROUP BY company")}
+            "SELECT company, COUNT(*) FROM jobs WHERE status IN ({}) GROUP BY company".format(
+                ",".join("?" * (len(TRIAGE) - 1))), [t for t in TRIAGE if t != "skip"])}
         rows = [(c, counts.get(c.name, 0)) for c in db.list_companies(conn)]
         return render(request, "companies.html", rows=rows)
 

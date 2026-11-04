@@ -61,3 +61,10 @@ class Preferences(BaseModel):
     search_terms: list[str]
     excluded_terms: list[str]
     target_roles: list[str] = []
+
+
+# Job statuses. Triage statuses come from grading; pipeline and closed ones are set by hand.
+TRIAGE = ("new", "ready", "needs", "low", "skip")
+PIPELINE = ("applied", "screening", "interviewing", "offer")
+CLOSED = ("accepted", "rejected", "withdrawn")
+STATUSES = TRIAGE + PIPELINE + CLOSED
