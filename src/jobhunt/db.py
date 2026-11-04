@@ -86,6 +86,11 @@ def list_companies(conn: sqlite3.Connection) -> list[Company]:
     return [Company(**dict(r)) for r in rows]
 
 
+def get_company(conn: sqlite3.Connection, name: str) -> Company | None:
+    row = conn.execute("SELECT * FROM companies WHERE name = ?", (name,)).fetchone()
+    return Company(**dict(row)) if row else None
+
+
 def set_company_scan(conn: sqlite3.Connection, name: str, *, error: str | None) -> None:
     conn.execute(
         "UPDATE companies SET last_scanned = ?, last_error = ? WHERE name = ?",

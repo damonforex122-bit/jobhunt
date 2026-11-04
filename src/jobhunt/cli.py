@@ -39,3 +39,7 @@ REGISTRARS.append(scan.register)
 from . import fit  # noqa: E402
 
 REGISTRARS.append(fit.register)
+
+from .people import finder  # noqa: E402
+
+REGISTRARS.append(finder.register)
