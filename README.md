@@ -22,6 +22,8 @@ uv run jobhunt fit <id> | --all-new   # grade one job, or every 'new' job (keywo
 uv run jobhunt people <job_id>   # find likely hiring managers for a job
 uv run jobhunt status <id> applied --note "Referred by Sam"   # move a job to a pipeline stage
 uv run jobhunt pipeline [--all]   # jobs by stage (--all adds accepted/rejected/withdrawn)
+uv run jobhunt gmail-auth   # one-time: connect Gmail, read-only (see "Gmail setup")
+uv run jobhunt gmail-sync [--days 30]   # suggest pipeline moves from recent recruiting emails
 uv run jobhunt serve     # web UI at http://127.0.0.1:8000
 ```
 
@@ -75,3 +77,35 @@ Apollo searches by company domain, so set `domain` on the company in
 ```
 
 Without a domain the people panel shows "Skipped apollo: <reason>".
+
+## Gmail setup (interview tracking)
+
+`gmail-sync` reads recent recruiting emails (read-only) and suggests pipeline moves such as
+*applied → screening* when a recruiter asks for a phone screen. Suggestions appear at the top of the
+**Pipeline** page with Accept / Dismiss buttons. **Nothing changes until you accept.** An accepted move
+is logged in the job's history with the email subject and date.
+
+How it decides:
+- **Stage:** fixed phrases. "phone screen" or "recruiter call" → screening; "onsite", "final round" or
+  "technical interview" → interviewing; "extend an offer" → offer; "unfortunately… not moving forward"
+  → rejected; "thank you for applying" → applied.
+- **Job:** the company name must appear in the sender or the subject, or be the sender's domain.
+  If the email names the job title, that job is used. Otherwise it picks the company's job that is furthest along.
+- **Which moves:** only moves forward, or moves that close an open job. Each email is checked once.
+
+Only the sender, subject, date and a 300-character snippet are stored, and only for emails that
+produced a suggestion. Email bodies are never stored.
+
+One-time setup (about 10 minutes):
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API**.
+2. Under **OAuth consent screen**, choose *External*. Add your Gmail address as a **test user**.
+3. Under **Credentials** → *Create credentials* → *OAuth client ID* → **Desktop app**. Download the
+   JSON and save it as `data/gmail_client_secret.json`. `data/` is git-ignored.
+4. Run `uv run jobhunt gmail-auth` and approve read-only access in the browser. The token is saved to
+   `data/gmail_token.json`, readable only by you.
+5. Run `uv run jobhunt gmail-sync`, or click **Sync Gmail** on the Pipeline page.
+
+While the Google app stays in *Testing* mode, Google expires the sign-in after 7 days. When sync
+says the token expired, run `gmail-auth` again.
+To use other file locations, set `GMAIL_CLIENT_SECRET` and `GMAIL_TOKEN`.
+

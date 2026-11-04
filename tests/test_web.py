@@ -244,3 +244,53 @@ def test_companies_open_count_excludes_pipeline_jobs(client, settings):
     assert r.status_code == 200
     row = r.text.split("Acme", 1)[1].split("</tr>", 1)[0]
     assert ">0<" in row
+
+
+def _suggest(settings, job_id=1, stage="screening", subject="Next steps with AfterQuery"):
+    conn = db.connect(settings.db_path)
+    db.set_job_status(conn, job_id, "applied")
+    db.save_gmail_message(conn, f"g{job_id}{stage}", job_id=job_id, sender="r@afterquery.com",
+                          subject=subject, received="2026-11-04", snippet="phone screen",
+                          suggested_status=stage)
+    sid = db.list_gmail_suggestions(conn)[0]["id"]
+    conn.close()
+    return sid
+
+
+def test_pipeline_shows_gmail_suggestions_and_accept_moves_job(client, settings):
+    sid = _suggest(settings)
+    page = client.get("/pipeline").text
+    assert "Suggested from Gmail" in page and "Next steps with AfterQuery" in page
+    assert f"/gmail/suggestions/{sid}/accept" in page
+    r = client.post(f"/gmail/suggestions/{sid}/accept", follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(settings.db_path)
+    assert db.get_job(conn, 1)["status"] == "screening"
+    assert db.list_gmail_suggestions(conn) == []
+    conn.close()
+
+
+def test_dismiss_keeps_stage(client, settings):
+    sid = _suggest(settings)
+    client.post(f"/gmail/suggestions/{sid}/dismiss")
+    conn = db.connect(settings.db_path)
+    assert db.get_job(conn, 1)["status"] == "applied" and db.list_gmail_suggestions(conn) == []
+    conn.close()
+
+
+def test_unknown_suggestion_404(client):
+    assert client.post("/gmail/suggestions/999/accept").status_code == 404
+
+
+def test_gmail_sync_not_connected_flashes_setup_hint(client):
+    r = client.post("/gmail/sync")
+    assert r.status_code == 200 and "gmail-auth" in r.text
+
+
+def test_gmail_sync_reports_counts(settings):
+    from jobhunt.gmail.sync import SyncReport
+
+    app = webapp.create_app(settings)
+    app.dependency_overrides[webapp.get_gmail_sync] = lambda: lambda conn, s: SyncReport(7, 2)
+    r = tc(app).post("/gmail/sync")
+    assert "7 new emails" in r.text and "2 suggested" in r.text

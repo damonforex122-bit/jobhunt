@@ -15,6 +15,8 @@ from fastapi.templating import Jinja2Templates
 from .. import db, importer, scan
 from ..config import Settings, short_error
 from ..fit import grade_job
+from ..gmail import sync as gmail_sync
+from ..gmail.auth import GmailNotConnected
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE
 from ..people.finder import find_people
 
@@ -46,6 +48,10 @@ def get_scanner() -> Callable:
 
 def get_importer() -> Callable:
     return importer.run_import
+
+
+def get_gmail_sync() -> Callable:
+    return gmail_sync.run_sync
 
 
 def _banner(s: Settings) -> list[str]:
@@ -156,7 +162,28 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/pipeline", response_class=HTMLResponse)
     def pipeline_page(request: Request, conn: Conn):
         return render(request, "pipeline.html", board=db.pipeline_board(conn),
-                      pipeline=PIPELINE, closed=CLOSED)
+                      pipeline=PIPELINE, closed=CLOSED,
+                      suggestions=db.list_gmail_suggestions(conn),
+                      gmail_connected=settings.gmail_token.exists())
+
+    @app.post("/gmail/sync")
+    def post_gmail_sync(conn: Conn, syncer: Annotated[Callable, Depends(get_gmail_sync)]):
+        try:
+            r = syncer(conn, settings)
+            msg = f"Checked {r.scanned} new emails, {r.suggested} suggested moves."
+        except GmailNotConnected as e:
+            msg = str(e)
+        except Exception as e:  # network/Google errors must not 500 the page
+            msg = f"Gmail sync failed: {short_error(e)}"
+        return RedirectResponse(f"/pipeline?msg={quote(msg)}", status_code=303)
+
+    @app.post("/gmail/suggestions/{suggestion_id}/{action}")
+    def post_suggestion(suggestion_id: int, action: str, conn: Conn):
+        if action not in ("accept", "dismiss"):
+            raise HTTPException(404, "unknown action")
+        if not db.resolve_gmail_suggestion(conn, suggestion_id, accept=action == "accept"):
+            raise HTTPException(404, "suggestion not found")
+        return RedirectResponse("/pipeline", status_code=303)
 
     @app.get("/companies", response_class=HTMLResponse)
     def companies(request: Request, conn: Conn):

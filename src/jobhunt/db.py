@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS job_events (
     at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS job_events_job ON job_events(job_id);
+CREATE TABLE IF NOT EXISTS gmail_messages (
+    gmail_id TEXT PRIMARY KEY,
+    job_id INTEGER REFERENCES jobs(id),
+    sender TEXT, subject TEXT, received TEXT, snippet TEXT,
+    suggested_status TEXT,
+    state TEXT NOT NULL  -- ignored | pending | accepted | dismissed
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -271,3 +278,50 @@ def pipeline_board(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     for r in rows:
         board[r["status"]].append(dict(r))
     return board
+
+
+# --- gmail -----------------------------------------------------------------
+
+def gmail_seen_ids(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT gmail_id FROM gmail_messages")}
+
+
+def jobs_for_matching(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in conn.execute("SELECT id, company, title, status FROM jobs")]
+
+
+def save_gmail_message(conn: sqlite3.Connection, gmail_id: str, *, job_id: int | None = None,
+                       sender: str | None = None, subject: str | None = None,
+                       received: str | None = None, snippet: str | None = None,
+                       suggested_status: str | None = None) -> None:
+    state = "pending" if suggested_status else "ignored"
+    conn.execute(
+        """INSERT OR IGNORE INTO gmail_messages (gmail_id, job_id, sender, subject, received,
+               snippet, suggested_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (gmail_id, job_id, sender, subject, received, snippet, suggested_status, state))
+    conn.commit()
+
+
+def list_gmail_suggestions(conn: sqlite3.Connection) -> list[dict]:
+    """Pending suggestions that would still move their job forward, newest email first."""
+    from .gmail.classify import should_suggest
+
+    rows = conn.execute(
+        """SELECT g.rowid AS id, g.*, j.company, j.title, j.status AS current_status
+           FROM gmail_messages g JOIN jobs j ON j.id = g.job_id
+           WHERE g.state = 'pending' ORDER BY g.received DESC, g.rowid DESC""").fetchall()
+    return [dict(r) for r in rows if should_suggest(r["current_status"], r["suggested_status"])]
+
+
+def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, accept: bool) -> bool:
+    row = conn.execute("SELECT * FROM gmail_messages WHERE rowid = ? AND state = 'pending'",
+                       (suggestion_id,)).fetchone()
+    if row is None:
+        return False
+    conn.execute("UPDATE gmail_messages SET state = ? WHERE rowid = ?",
+                 ("accepted" if accept else "dismissed", suggestion_id))
+    conn.commit()
+    if accept:
+        set_job_status(conn, row["job_id"], row["suggested_status"],
+                       note=f"From Gmail: {row['subject']} ({row['received']})")
+    return True

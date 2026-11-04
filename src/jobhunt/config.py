@@ -12,8 +12,12 @@ class Settings(BaseModel):
     apollo_api_key: str | None = None
     exa_api_key: str | None = None
     watchlist_path: Path = Path("config/watchlist.yaml")
+    # Gmail (read-only). Both files live in data/, which git ignores.
+    gmail_client_secret: Path = Path("data/gmail_client_secret.json")
+    gmail_token: Path = Path("data/gmail_token.json")
 
-    @field_validator("proficiently_dir", "db_path", "watchlist_path")
+    @field_validator("proficiently_dir", "db_path", "watchlist_path", "gmail_client_secret",
+                     "gmail_token")
     @classmethod
     def _expand_home(cls, v: Path) -> Path:
         return Path(v).expanduser()

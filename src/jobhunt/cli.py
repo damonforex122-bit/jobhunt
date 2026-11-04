@@ -65,3 +65,7 @@ REGISTRARS.append(_register_serve)
 from . import pipeline  # noqa: E402
 
 REGISTRARS.append(pipeline.register)
+
+from .gmail import sync as gmail_sync  # noqa: E402
+
+REGISTRARS.append(gmail_sync.register)

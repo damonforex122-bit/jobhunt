@@ -1,6 +1,17 @@
 {% extends "base.html" %}{% block body %}
 <h1>Pipeline</h1>
 <p class="muted">Move a job here by setting its status on the job page, or with <code>jobhunt status &lt;id&gt; applied</code>.</p>
+<h2>Suggested from Gmail</h2>
+<form method="post" action="/gmail/sync" style="display:inline"><button>Sync Gmail</button></form>
+{% if not gmail_connected %}<span class="muted">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
+{% if suggestions %}<table><tr><th>Email</th><th>Job</th><th>Move</th><th></th></tr>
+{% for s in suggestions %}<tr><td><span class="muted">{{ s.received }} &middot; {{ s.sender }}</span><br>{{ s.subject }}<br><span class="muted">{{ s.snippet }}</span></td>
+<td>{{ s.company }}<br><a href="/jobs/{{ s.job_id }}">{{ s.title }}</a></td>
+<td>{{ s.current_status }} &rarr; <b>{{ s.suggested_status }}</b></td>
+<td><form method="post" action="/gmail/suggestions/{{ s.id }}/accept" style="display:inline"><button>Accept</button></form>
+<form method="post" action="/gmail/suggestions/{{ s.id }}/dismiss" style="display:inline"><button>Dismiss</button></form></td></tr>{% endfor %}
+</table>{% else %}<p class="muted">No suggestions right now.</p>{% endif %}
+<h2>Stages</h2>
 <div class="board">
 {% for stage in pipeline %}<div class="col"><h3>{{ stage }} ({{ board[stage]|length }})</h3>
 {% for j in board[stage] %}<div class="card"><div class="co">{{ j.company }}</div>
