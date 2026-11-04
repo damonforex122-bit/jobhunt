@@ -157,7 +157,7 @@ def list_jobs(
         where.append("j.company = ?")
         args.append(company)
     sql = (
-        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error "
+        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error, f.model AS fit_model "
         "FROM jobs j LEFT JOIN fits f ON f.job_id = j.id"
     )
     if where:

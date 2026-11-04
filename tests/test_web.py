@@ -7,6 +7,10 @@ from jobhunt.models import Company, Fit, Job, Person
 from jobhunt.web import app as webapp
 
 
+def tc(app):
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
 @pytest.fixture
 def settings(tmp_path):
     s = Settings(db_path=tmp_path / "web.db", proficiently_dir=tmp_path / "prof")
@@ -33,7 +37,7 @@ def settings(tmp_path):
 
 @pytest.fixture
 def client(settings):
-    return TestClient(webapp.create_app(settings))
+    return tc(webapp.create_app(settings))
 
 
 def test_index_lists_jobs_sorted_by_score(client):
@@ -68,7 +72,7 @@ def test_post_fit_uses_injected_grader(settings):
         return f
 
     app.dependency_overrides[webapp.get_grader] = lambda: fake
-    r = TestClient(app).post("/jobs/2/fit")
+    r = tc(app).post("/jobs/2/fit")
     assert r.status_code == 200
     assert "FAKE-REASON" in r.text and "7" in r.text
 
@@ -77,7 +81,7 @@ def test_post_people_uses_injected_finder(settings):
     app = webapp.create_app(settings)
     called = []
     app.dependency_overrides[webapp.get_finder] = lambda: lambda conn, job_id, settings: called.append(job_id)
-    r = TestClient(app).post("/jobs/1/people")
+    r = tc(app).post("/jobs/1/people")
     assert r.status_code == 200 and called == [1]
 
 
@@ -100,7 +104,7 @@ def test_banner_shows_missing_keys(client):
 
 def test_banner_hidden_when_keys_set(settings):
     s = settings.model_copy(update={"gemini_api_key": "k", "apollo_api_key": "k", "exa_api_key": "k"})
-    assert "grading off" not in TestClient(webapp.create_app(s)).get("/").text
+    assert "grading off" not in tc(webapp.create_app(s)).get("/").text
 
 
 def test_companies_page_shows_last_error(client):
@@ -114,7 +118,7 @@ def test_post_scan_redirects_with_flash(settings):
     app = webapp.create_app(settings)
     app.dependency_overrides[webapp.get_scanner] = lambda: lambda conn, s: ScanReport(
         companies_scanned=3, jobs_seen=10, jobs_kept=4, jobs_new=2, errors={"Acme": "x"})
-    c = TestClient(app)
+    c = tc(app)
     r = c.post("/scan", follow_redirects=True)
     assert "Scanned 3 companies" in r.text and "2 new" in r.text
 
@@ -122,7 +126,7 @@ def test_post_scan_redirects_with_flash(settings):
 def test_post_import_redirects_with_flash(settings):
     app = webapp.create_app(settings)
     app.dependency_overrides[webapp.get_importer] = lambda: lambda conn, d: {"jobs": 5}
-    r = TestClient(app).post("/import", follow_redirects=True)
+    r = tc(app).post("/import", follow_redirects=True)
     assert "Import" in r.text and "jobs" in r.text
 
 
@@ -146,8 +150,68 @@ def test_hostile_urls_not_rendered_in_href(settings):
                                   linkedin_url="data:text/html,x", confidence=0.5))
     db.upsert_job(conn, Job(company="Evil", title="Bad", url="javascript:alert(2)", source="ats"))
     conn.close()
-    c = TestClient(webapp.create_app(settings))
+    c = tc(webapp.create_app(settings))
     for path in ("/jobs/1", "/jobs/3"):
         html = c.get(path).text
         assert "Evil Person" in html or path == "/jobs/3"
         assert not re.search(r'href="\s*(javascript|data):', html, re.I)
+
+
+def test_foreign_origin_post_rejected(client):
+    r = client.post("/jobs/1/status", data={"status": "applied"},
+                    headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403
+    r = client.post("/jobs/1/status", data={"status": "applied"},
+                    headers={"Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 403
+    ok = client.post("/jobs/1/status", data={"status": "applied"}, follow_redirects=False,
+                     headers={"Origin": "http://localhost:3000"})
+    assert ok.status_code == 303
+
+
+def test_foreign_host_rejected(settings):
+    r = TestClient(webapp.create_app(settings), base_url="http://evil.example").get("/")
+    assert r.status_code == 400
+
+
+def test_post_people_shows_skipped_reasons(settings):
+    from jobhunt.people.finder import FinderReport
+
+    app = webapp.create_app(settings)
+    app.dependency_overrides[webapp.get_finder] = lambda: lambda conn, job_id, s: FinderReport(
+        people=[], skipped={"apollo": "no domain for company", "exa": "EXA_API_KEY not set"})
+    html = tc(app).post("/jobs/1/people").text
+    assert "Skipped apollo: no domain for company" in html
+    assert "Skipped exa: EXA_API_KEY not set" in html
+
+
+def test_post_scan_and_import_flash_predictable_errors(settings):
+    app = webapp.create_app(settings)
+
+    def bad_scan(conn, s):
+        from pydantic import ValidationError
+
+        from jobhunt.models import Company
+
+        Company(name="A", ats="greehouse")
+
+    def bad_import(conn, d):
+        raise FileNotFoundError("job-history.md not found in /nope")
+
+    app.dependency_overrides[webapp.get_scanner] = lambda: bad_scan
+    app.dependency_overrides[webapp.get_importer] = lambda: bad_import
+    c = tc(app)
+    r = c.post("/scan", follow_redirects=True)
+    assert r.status_code == 200 and "Scan failed" in r.text and "ats" in r.text
+    r = c.post("/import", follow_redirects=True)
+    assert r.status_code == 200 and "Import failed" in r.text and "job-history.md not found" in r.text
+
+
+def test_imported_fit_shows_blank_keyword_pct(settings):
+    conn = db.connect(settings.db_path)
+    conn.execute("UPDATE fits SET model = 'proficiently-import', keyword_score = 0 WHERE job_id = 1")
+    conn.commit()
+    conn.close()
+    html = tc(webapp.create_app(settings)).get("/").text
+    row = html[html.index("Evals Lead"):html.index("Researcher")]
+    assert "<td>0</td>" not in row

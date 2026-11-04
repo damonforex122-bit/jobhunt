@@ -12,7 +12,7 @@
 <td>{{ j.company }}</td><td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
 <td>{% with flags=j.flags %}{% include "_flags.html" %}{% endwith %}</td>
 <td>{{ j.llm_score if j.llm_score is not none else '' }}{% if j.fit_error %} <span class="err" title="{{ j.fit_error }}">!</span>{% endif %}</td>
-<td>{{ j.keyword_score if j.keyword_score is not none else '' }}</td>
+<td>{{ j.keyword_score if j.keyword_score is not none and j.fit_model != 'proficiently-import' else '' }}</td>
 <td>{{ j.status }}</td><td>{{ (j.first_seen or '')[:10] }}</td></tr>
 {% else %}<tr><td colspan="8">No jobs. Try <code>jobhunt import</code> or Scan on the Companies page.</td></tr>{% endfor %}
 </table>{% endblock %}

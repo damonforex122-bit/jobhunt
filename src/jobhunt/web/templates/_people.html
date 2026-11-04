@@ -1,6 +1,7 @@
 <div id="people">
 <h2>People at {{ job.company }}</h2>
 {% if people_error %}<p class="err">{{ people_error }}</p>{% endif %}
+{% for src, reason in (skipped or {}).items() %}<p class="err">Skipped {{ src }}: {{ reason }}</p>{% endfor %}
 {% if people %}<table><tr><th>Name</th><th>Title</th><th>Source</th><th>Link</th></tr>
 {% for p in people %}<tr><td>{{ p.name }}</td><td>{{ p.title or '' }}</td>
 <td><span class="badge">{{ p.source }}</span></td>

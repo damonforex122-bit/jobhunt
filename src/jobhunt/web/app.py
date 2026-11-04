@@ -4,14 +4,16 @@ import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
+import yaml
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db, importer, scan
-from ..config import Settings
+from ..config import Settings, short_error
 from ..fit import grade_job
 from ..people.finder import find_people
 
@@ -57,8 +59,27 @@ def _banner(s: Settings) -> list[str]:
     return msgs
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+# Predictable failures from scan/import (bad watchlist, missing Proficiently dir, ...)
+_ACTION_ERRORS = (ValueError, OSError, yaml.YAMLError)
+
+
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="jobhunt")
+
+    @app.middleware("http")
+    async def reject_cross_site_posts(request: Request, call_next):
+        if request.method == "POST":
+            origin = request.headers.get("origin")
+            cross = request.headers.get("sec-fetch-site", "").lower() == "cross-site"
+            if origin is not None and (urlsplit(origin).hostname or "") not in LOCAL_HOSTS:
+                cross = True
+            if cross:
+                return PlainTextResponse("cross-site request rejected", status_code=403)
+        return await call_next(request)
+
+    # Added last, so it runs first: blocks DNS-rebinding requests with a foreign Host header.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(LOCAL_HOSTS))
 
     def get_conn() -> Iterator:
         # Sync routes/dependencies may run on different threadpool threads, so the
@@ -113,12 +134,14 @@ def create_app(settings: Settings) -> FastAPI:
     def post_people(request: Request, job_id: int, conn: Conn,
                     finder: Annotated[Callable, Depends(get_finder)]):
         job = job_or_404(conn, job_id)
-        error = None
+        error, skipped = None, {}
         try:
-            finder(conn, job_id, settings)
+            report = finder(conn, job_id, settings)
+            skipped = getattr(report, "skipped", None) or {}
         except Exception as e:  # a failing provider must not 500 the panel
             error = str(e)
-        return render(request, "_people.html", **panel_ctx(conn, job, people_error=error))
+        return render(request, "_people.html",
+                      **panel_ctx(conn, job, people_error=error, skipped=skipped))
 
     @app.post("/jobs/{job_id}/status")
     def post_status(job_id: int, conn: Conn, status: Annotated[str, Form()]):
@@ -138,14 +161,22 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/scan")
     def post_scan(conn: Conn, scanner: Annotated[Callable, Depends(get_scanner)]):
-        r = scanner(conn, settings)
+        try:
+            r = scanner(conn, settings)
+        except _ACTION_ERRORS as e:
+            return RedirectResponse(f"/companies?msg={quote('Scan failed: ' + short_error(e))}",
+                                    status_code=303)
         msg = (f"Scanned {r.companies_scanned} companies: {r.jobs_seen} seen, "
                f"{r.jobs_kept} kept, {r.jobs_new} new, {len(r.errors)} errors")
         return RedirectResponse(f"/companies?msg={quote(msg)}", status_code=303)
 
     @app.post("/import")
     def post_import(conn: Conn, importer_fn: Annotated[Callable, Depends(get_importer)]):
-        r = importer_fn(conn, settings.proficiently_dir)
+        try:
+            r = importer_fn(conn, settings.proficiently_dir)
+        except _ACTION_ERRORS as e:
+            return RedirectResponse(f"/companies?msg={quote('Import failed: ' + short_error(e))}",
+                                    status_code=303)
         msg = "Import done: " + ", ".join(f"{k} {v}" for k, v in r.items())
         return RedirectResponse(f"/companies?msg={quote(msg)}", status_code=303)
 
