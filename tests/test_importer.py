@@ -109,3 +109,24 @@ def test_job_dir_match_requires_exact_date_suffix(conn, tmp_path):
         (jobs / name / "posting.md").write_text(text)
     run_import(conn, tmp_path)
     assert db.list_jobs(conn)[0]["description"] == "NEW"
+
+
+def test_run_import_missing_dir_or_history_raises(conn, tmp_path):
+    import pytest
+
+    from jobhunt.importer import ImportSourceError
+
+    with pytest.raises(ImportSourceError, match="nope"):
+        run_import(conn, tmp_path / "nope")
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(ImportSourceError, match="job-history.md"):
+        run_import(conn, tmp_path / "empty")
+
+
+def test_cli_import_missing_dir_prints_error(tmp_path, monkeypatch, capsys):
+    from jobhunt.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["import", "--dir", str(tmp_path / "nope")]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("error:") and "nope" in out and "Traceback" not in out

@@ -110,3 +110,21 @@ def test_scan_survives_bad_posting_and_unexpected_exception(conn, tmp_path, monk
     assert "boom" in report.errors["A"] and "B" not in report.errors
     assert report.companies_scanned == 2
     assert {c.name: c.last_error for c in db.list_companies(conn)}["A"].startswith("unexpected error")
+
+
+def test_cli_scan_bad_watchlist_prints_error(tmp_path, monkeypatch, capsys):
+    from jobhunt.cli import main
+
+    pdir = tmp_path / "prof"
+    pdir.mkdir()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "watchlist.yaml").write_text("- {name: A, ats: greehouse, slug: a}\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PROFICIENTLY_DIR", str(pdir))
+    assert main(["scan"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("error:") and "ats" in out and "\n" not in out.strip()
+
+    (tmp_path / "config" / "watchlist.yaml").write_text("- {name: [unclosed\n")
+    assert main(["scan"]) == 1
+    assert capsys.readouterr().out.startswith("error:")

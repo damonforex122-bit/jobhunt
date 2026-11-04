@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import httpx
+import yaml
 
 from . import db, filters
 from .config import Settings
@@ -86,7 +87,7 @@ def run_scan(
 
 
 def register(sub) -> None:
-    from .config import load_settings
+    from .config import load_settings, short_error
 
     p = sub.add_parser("scan", help="Scan job boards for matching openings")
 
@@ -95,6 +96,9 @@ def register(sub) -> None:
         conn = db.connect(settings.db_path)
         try:
             report = run_scan(conn, settings)
+        except (ValueError, yaml.YAMLError, OSError) as e:  # bad watchlist/preferences
+            print(f"error: {short_error(e)}")
+            return 1
         finally:
             conn.close()
         print(

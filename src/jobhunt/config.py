@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, field_validator
 
 
 class Settings(BaseModel):
@@ -12,6 +12,22 @@ class Settings(BaseModel):
     apollo_api_key: str | None = None
     exa_api_key: str | None = None
     watchlist_path: Path = Path("config/watchlist.yaml")
+
+    @field_validator("proficiently_dir", "db_path", "watchlist_path")
+    @classmethod
+    def _expand_home(cls, v: Path) -> Path:
+        return Path(v).expanduser()
+
+
+def short_error(exc: Exception) -> str:
+    """One-line, bounded description of a predictable user-facing failure."""
+    if isinstance(exc, ValidationError):
+        first = exc.errors()[0]
+        loc = ".".join(str(x) for x in first["loc"])
+        msg = f"invalid config ({loc}): {first['msg']}"
+    else:
+        msg = str(exc) or type(exc).__name__
+    return " ".join(msg.split())[:200]
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:

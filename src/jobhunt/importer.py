@@ -15,6 +15,10 @@ REQUIRED_COLUMNS = {"company", "role", "score", "job url"}
 PERSON_RE = re.compile(r"^\s*-\s+\*\*(?P<name>[^*]+)\*\*\s*,?\s*(?P<rest>.*?):\s*(?P<url>https?://\S+)\s*$")
 
 
+class ImportSourceError(FileNotFoundError):
+    """The Proficiently directory or its job-history.md is missing."""
+
+
 @dataclass
 class ImportedJob:
     job: Job
@@ -109,7 +113,11 @@ def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
 def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, int]:
     root = Path(proficiently_dir)
     history = root / "job-history.md"
-    imported = parse_job_history(history.read_text()) if history.is_file() else []
+    if not root.is_dir():
+        raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
+    if not history.is_file():
+        raise ImportSourceError(f"job-history.md not found in {root}")
+    imported = parse_job_history(history.read_text())
     jobs_root = root / "jobs"
     dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
 
@@ -162,7 +170,7 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, in
 
 
 def register(sub) -> None:
-    from .config import load_settings
+    from .config import load_settings, short_error
 
     p = sub.add_parser("import", help="Import existing .proficiently job history")
     p.add_argument("--dir", type=Path, default=None, help="Path to the .proficiently directory")
@@ -176,6 +184,9 @@ def register(sub) -> None:
         conn = connect(settings.db_path)
         try:
             print(run_import(conn, directory))
+        except (ImportSourceError, OSError) as e:
+            print(f"error: {short_error(e)}")
+            return 1
         finally:
             conn.close()
         return 0
