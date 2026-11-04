@@ -97,3 +97,27 @@ def test_excluded_term_flagged_not_dropped():
 def test_non_usd_skips_floor():
     keep, flags = filters.evaluate(_job(salary_min=50000, salary_max=90000, flags=["non_usd"]), PREFS)
     assert keep and flags == ["non_usd"]
+
+
+@pytest.mark.parametrize("title", [
+    "Senior Technical Recruiter - Engineering",
+    "Recruiter (Research)",
+    "Strategic Sourcing Lead, Professional Services – Human Data",
+    "Senior Product Marketing Manager, Labs & Research",
+    "Senior IT Platform and Automation Engineer",
+    "Account Executive, Evals Platform",
+])
+def test_non_technical_titles_dropped_even_with_matching_terms(title):
+    desc = "We build evals and benchmarks with human data."
+    assert filters.title_match(title, desc, PREFS) is False
+
+
+@pytest.mark.parametrize("title", [
+    "Data Operations Manager, Human Data",
+    "Research Engineer, Benchmarks & Evaluation",
+    "Software Engineer, Research - Human Data",
+    "Staff Software Engineer, GTM AI Engineering",
+    "Member of Technical Staff - Evals Infra",
+])
+def test_technical_titles_with_lookalike_words_still_match(title):
+    assert filters.title_match(title, "We build evals and benchmarks.", PREFS) is True

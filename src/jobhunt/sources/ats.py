@@ -32,6 +32,13 @@ def _strip_html(text: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def _clean(text: str | None) -> str | None:
+    """Titles and locations: decode HTML entities (&amp;) and collapse/trim whitespace."""
+    if text is None:
+        return None
+    return " ".join(html.unescape(text).split()) or None
+
+
 # One malformed posting must not sink the board: it is skipped and counted.
 _BAD_POSTING = (KeyError, TypeError, AttributeError, ValueError)  # ValueError incl. ValidationError
 
@@ -39,9 +46,9 @@ _BAD_POSTING = (KeyError, TypeError, AttributeError, ValueError)  # ValueError i
 def _greenhouse_job(co: Company, j) -> Job:
     return Job(
         company=co.name,
-        title=j["title"],
+        title=_clean(j["title"]),
         url=j["absolute_url"],
-        location=(j.get("location") or {}).get("name"),
+        location=_clean((j.get("location") or {}).get("name")),
         description=_strip_html(j.get("content")),
         source="greenhouse",
         posted_at=j.get("updated_at"),
@@ -50,14 +57,14 @@ def _greenhouse_job(co: Company, j) -> Job:
 
 def _ashby_job(co: Company, j) -> Job:
     locs = [j.get("location")] + [s.get("location") for s in j.get("secondaryLocations") or []]
-    location = "; ".join(l for l in locs if l) or None
+    location = "; ".join(c for c in map(_clean, locs) if c) or None
     desc = j.get("descriptionPlain") or ""
     summary = (j.get("compensation") or {}).get("compensationTierSummary")
     if summary:
         desc = f"Compensation: {summary}\n\n{desc}"
     return Job(
         company=co.name,
-        title=j["title"],
+        title=_clean(j["title"]),
         url=j["jobUrl"],
         location=location,
         description=desc,
@@ -76,9 +83,9 @@ def _lever_job(co: Company, j) -> Job:
     )
     return Job(
         company=co.name,
-        title=j["text"],
+        title=_clean(j["text"]),
         url=j["hostedUrl"],
-        location=(j.get("categories") or {}).get("location"),
+        location=_clean((j.get("categories") or {}).get("location")),
         salary_min=int(sr["min"]) if sr.get("min") is not None else None,
         salary_max=int(sr["max"]) if sr.get("max") is not None else None,
         description=j.get("descriptionPlain"),

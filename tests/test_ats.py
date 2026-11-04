@@ -136,3 +136,23 @@ def test_unknown_slug_404_and_unexpected_shape():
     respx.get("https://api.ashbyhq.com/posting-api/job-board/x").respond(json={"wrong": 1})
     with pytest.raises(ats.FetchError, match="unexpected response shape"):
         ats.fetch_jobs(Company(name="X", ats="ashby", slug="x"), _client())
+
+
+@respx.mock
+def test_titles_and_locations_are_unescaped_and_trimmed():
+    data = {"jobs": [{"title": "  Research Scientist, Human Data &amp; Evaluation ",
+                      "jobUrl": "https://jobs.ashbyhq.com/contra/1",
+                      "location": "London &amp;  San Francisco", "descriptionPlain": "x"}]}
+    respx.get("https://api.ashbyhq.com/posting-api/job-board/contra").respond(json=data)
+    gh = {"jobs": [{"title": " Evals &amp; Benchmarks", "absolute_url": "https://x.test/1",
+                    "location": {"name": "NY &amp; SF "}, "content": ""}]}
+    respx.get("https://boards-api.greenhouse.io/v1/boards/acme/jobs").respond(json=gh)
+    lv = [{"text": "Evals\u00a0Lead &amp; Co ", "hostedUrl": "https://jobs.lever.co/a/1",
+           "categories": {"location": " New York "}}]
+    respx.get("https://api.lever.co/v0/postings/lv").respond(json=lv)
+    a = ats.fetch_jobs(Company(name="Contra", ats="ashby", slug="contra"), _client())[0]
+    g = ats.fetch_jobs(Company(name="Acme", ats="greenhouse", slug="acme"), _client())[0]
+    l = ats.fetch_jobs(Company(name="Lv", ats="lever", slug="lv"), _client())[0]
+    assert (a.title, a.location) == ("Research Scientist, Human Data & Evaluation", "London & San Francisco")
+    assert (g.title, g.location) == ("Evals & Benchmarks", "NY & SF")
+    assert (l.title, l.location) == ("Evals Lead & Co", "New York")

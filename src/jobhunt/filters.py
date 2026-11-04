@@ -93,7 +93,19 @@ _TECH_ROLE_RE = re.compile(
 )
 
 
+# Titles naming a non-technical function are never a match, even when they mention
+# "research", "engineering" or a search term ("Technical Recruiter - Engineering").
+_NON_TECH_RE = re.compile(
+    r"(?<![a-z0-9])(recruiters?|recruiting|sourcing|sourcer|talent acquisition|marketing"
+    r"|sales|account executives?)(?![a-z0-9])",
+    re.I,
+)
+_IT_RE = re.compile(r"(?<![A-Za-z0-9])IT(?![A-Za-z0-9])")  # case-sensitive: "IT", not "it"
+
+
 def title_match(title: str, description: str | None, prefs: Preferences) -> bool:
+    if _NON_TECH_RE.search(title) or _IT_RE.search(title):
+        return False
     terms = [t for t in prefs.search_terms if not any(_contains(t, x) for x in prefs.excluded_terms)]
     title_phrases = [f for t in terms for f in _singular_forms(t)]
     title_phrases += _role_keywords(prefs.target_roles, prefs.excluded_terms)
