@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block body %}
+<h1>Companies</h1>
+<form method="post" action="/scan" style="display:inline"><button>Scan now</button></form>
+<form method="post" action="/import" style="display:inline"><button>Import</button></form>
+<table><tr><th>Company</th><th>ATS</th><th>Open jobs</th><th>Last scanned</th><th>Last error</th></tr>
+{% for c, n in rows %}<tr><td>{{ c.name }}</td><td>{{ c.ats or '' }}</td><td>{{ n }}</td>
+<td>{{ c.last_scanned or '' }}</td><td>{% if c.last_error %}<span class="err">{{ c.last_error }}</span>{% endif %}</td></tr>{% endfor %}
+</table>{% endblock %}

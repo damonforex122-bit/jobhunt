@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h1>Jobs</h1>
+<form method="get">
+  <select name="status"><option value="">any status</option>
+  {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>{% endfor %}</select>
+  min score <input name="min_score" size="3" value="{{ min_score }}">
+  company <input name="company" value="{{ company }}">
+  <button>Filter</button>
+</form>
+<table><tr><th>Company</th><th>Title</th><th>Location</th><th>Flags</th><th>LLM</th><th>Keyword %</th><th>Status</th><th>First seen</th></tr>
+{% for j in jobs %}<tr>
+<td>{{ j.company }}</td><td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
+<td>{% with flags=j.flags %}{% include "_flags.html" %}{% endwith %}</td>
+<td>{{ j.llm_score if j.llm_score is not none else '' }}{% if j.fit_error %} <span class="err" title="{{ j.fit_error }}">!</span>{% endif %}</td>
+<td>{{ j.keyword_score if j.keyword_score is not none else '' }}</td>
+<td>{{ j.status }}</td><td>{{ (j.first_seen or '')[:10] }}</td></tr>
+{% else %}<tr><td colspan="8">No jobs. Try <code>jobhunt import</code> or Scan on the Companies page.</td></tr>{% endfor %}
+</table>{% endblock %}

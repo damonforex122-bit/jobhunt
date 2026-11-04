@@ -43,3 +43,21 @@ REGISTRARS.append(fit.register)
 from .people import finder  # noqa: E402
 
 REGISTRARS.append(finder.register)
+
+
+def _register_serve(sub) -> None:
+    p = sub.add_parser("serve", help="Run the local web UI on 127.0.0.1:8000")
+
+    def handler(args) -> int:
+        import uvicorn
+
+        from .config import load_settings
+        from .web.app import create_app
+
+        uvicorn.run(create_app(load_settings()), host="127.0.0.1", port=8000)
+        return 0
+
+    p.set_defaults(handler=handler)
+
+
+REGISTRARS.append(_register_serve)

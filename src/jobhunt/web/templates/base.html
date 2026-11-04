@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>jobhunt</title>
+<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+<style>
+body{font:14px system-ui,sans-serif;margin:0 auto;max-width:1100px;padding:1rem;color:#222}
+nav a{margin-right:1rem}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.35rem .5rem;border-bottom:1px solid #eee}
+.banner{background:#fff4d6;border:1px solid #e6c766;padding:.4rem .8rem;margin:.5rem 0}
+.flash{background:#e3f4e3;border:1px solid #8c8;padding:.4rem .8rem;margin:.5rem 0}
+.badge{display:inline-block;background:#eee;border-radius:3px;padding:0 .4rem;font-size:12px;margin-right:.2rem}
+.chip{display:inline-block;background:#e8eefc;border-radius:10px;padding:0 .5rem;margin:.1rem;font-size:12px}
+.err{color:#c00}.posting{white-space:pre-wrap;background:#fafafa;padding:.8rem;border:1px solid #eee}
+.pair{margin:.4rem 0}.pair .o{color:#888}
+</style></head><body>
+<nav><a href="/">Jobs</a><a href="/companies">Companies</a></nav>
+{% for b in banner %}<div class="banner">{{ b }}</div>{% endfor %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% block body %}{% endblock %}
+</body></html>

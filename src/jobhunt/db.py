@@ -54,10 +54,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def connect(path: Path) -> sqlite3.Connection:
+def connect(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     return conn
