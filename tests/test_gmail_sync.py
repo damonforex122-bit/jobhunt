@@ -7,7 +7,7 @@ import respx
 from jobhunt import db
 from jobhunt.config import Settings
 from jobhunt.gmail import auth, sync
-from jobhunt.gmail.client import API, GmailClient
+from jobhunt.gmail.client import API, GmailClient, GmailError
 from jobhunt.models import Job
 
 
@@ -125,3 +125,25 @@ def test_access_token_without_setup_raises_clear_error(tmp_path):
     s = Settings(gmail_token=tmp_path / "none.json", gmail_client_secret=tmp_path / "none2.json")
     with pytest.raises(auth.GmailNotConnected, match="gmail-auth"):
         auth.access_token(s)
+
+
+@respx.mock
+def test_client_retries_rate_limit_then_succeeds():
+    limited = httpx.Response(403, json={"error": {"errors": [{"reason": "rateLimitExceeded"}],
+                                                  "message": "Quota exceeded"}})
+    route = respx.get(f"{API}/messages").mock(side_effect=[
+        limited, httpx.Response(429, headers={"Retry-After": "3"}),
+        httpx.Response(200, json={"messages": [{"id": "a"}]})])
+    sleeps = []
+    c = GmailClient("tok", httpx.Client(), sleep=sleeps.append)
+    assert c.list_ids("q") == ["a"]
+    assert route.call_count == 3 and sleeps[1] == 3
+
+
+@respx.mock
+def test_client_gives_up_with_google_reason():
+    respx.get(f"{API}/messages").respond(403, json={"error": {"message": "Gmail API has not been used",
+                                                              "errors": [{"reason": "accessNotConfigured"}]}})
+    c = GmailClient("tok", httpx.Client(), sleep=lambda s: None)
+    with pytest.raises(GmailError, match="403.*Gmail API has not been used"):
+        c.list_ids("q")

@@ -1,5 +1,7 @@
 """Minimal read-only Gmail REST client (messages.list and messages.get)."""
 import base64
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -8,6 +10,11 @@ import httpx
 from ..sources.ats import _strip_html
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
+_RATE_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
+
+
+class GmailError(Exception):
+    """A Gmail API failure, with Google's status code and message."""
 
 
 @dataclass
@@ -45,14 +52,32 @@ def _body(payload: dict) -> str:
 
 
 class GmailClient:
-    def __init__(self, token: str, http: httpx.Client):
+    def __init__(self, token: str, http: httpx.Client, sleep: Callable[[float], None] = time.sleep,
+                 retries: int = 5):
         self.http = http
         self.headers = {"Authorization": f"Bearer {token}"}
+        self.sleep, self.retries = sleep, retries
+
+    @staticmethod
+    def _error(r: httpx.Response) -> tuple[str, set[str]]:
+        try:
+            err = r.json().get("error") or {}
+        except ValueError:
+            return r.text[:150], set()
+        return str(err.get("message", ""))[:150], {e.get("reason") for e in err.get("errors") or []}
 
     def _get(self, url: str, params: dict | None = None) -> dict:
-        r = self.http.get(url, params=params, headers=self.headers, timeout=20)
-        r.raise_for_status()
-        return r.json()
+        for attempt in range(self.retries + 1):
+            r = self.http.get(url, params=params, headers=self.headers, timeout=20)
+            if r.status_code < 400:
+                return r.json()
+            message, reasons = self._error(r)
+            limited = r.status_code == 429 or (r.status_code == 403 and reasons & _RATE_REASONS)
+            if not limited or attempt == self.retries:
+                raise GmailError(f"Gmail API {r.status_code}: {message}")
+            retry_after = r.headers.get("retry-after", "")
+            self.sleep(float(retry_after) if retry_after.isdigit() else min(2 ** (attempt + 1), 60))
+        raise AssertionError("unreachable")
 
     def list_ids(self, query: str, limit: int = 200) -> list[str]:
         ids, token = [], None

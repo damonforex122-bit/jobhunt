@@ -8,7 +8,7 @@ from .. import db
 from ..config import Settings
 from .auth import GmailNotConnected, access_token, run_auth
 from .classify import classify, match_job, should_suggest
-from .client import GmailClient
+from .client import GmailClient, GmailError
 
 KEYWORDS = ('interview OR application OR applying OR "next steps" OR onsite OR offer OR '
             'unfortunately OR recruiter OR "phone screen" OR candidacy')
@@ -74,6 +74,10 @@ def register(sub) -> None:
             report = run_sync(conn, settings, days=args.days)
         except GmailNotConnected as e:
             print(e, file=sys.stderr)
+            return 1
+        except GmailError as e:
+            print(f"{e}\nEmails checked before the error are saved; run gmail-sync again to continue.",
+                  file=sys.stderr)
             return 1
         except httpx.HTTPError as e:
             print(f"Gmail request failed: {type(e).__name__}", file=sys.stderr)
