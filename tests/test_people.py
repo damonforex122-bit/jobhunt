@@ -101,3 +101,22 @@ def test_find_people_apollo_500_still_runs_exa(conn):
     assert "exa" not in rep.skipped
     assert [p.name for p in rep.people] == ["Jane Doe", "Head of Research (unnamed)"]
     assert all(p.source_url for p in rep.people)
+
+
+def test_extract_rejects_generic_phrases():
+    for text in (
+        "You will work closely with Senior Engineers, Product Managers and Designers.",
+        "You will partner with Product Managers, Designers and Engineers.",
+        "The team is led by Experienced Researchers.",
+    ):
+        assert [p for p in posting.extract_people(text, URL, "Acme") if "unnamed" not in p.name] == [], text
+
+
+def test_extract_reports_to_person_name():
+    ps = posting.extract_people("This role reports to Jane Doe.", URL, "Acme")
+    assert [(p.name, p.title) for p in ps] == [("Jane Doe", None)]
+
+
+def test_extract_hiring_manager_trailing_text():
+    ps = posting.extract_people("Hiring manager: Sam Lee will review applications.", URL, "Acme")
+    assert [p.name for p in ps] == ["Sam Lee"]
