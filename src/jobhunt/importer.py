@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .db import save_fit, upsert_company, upsert_job, upsert_person
+from .db import get_fit, save_fit, upsert_company, upsert_job, upsert_person
 from .models import Company, Fit, Job, Person
-from .urls import ats_from_url
+from .urls import ats_from_url, normalize_url
 
+IMPORT_MODEL = "proficiently-import"
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 REQUIRED_COLUMNS = {"company", "role", "score", "job url"}
 PERSON_RE = re.compile(r"^\s*-\s+\*\*(?P<name>[^*]+)\*\*\s*,?\s*(?P<rest>.*?):\s*(?P<url>https?://\S+)\s*$")
 
@@ -97,8 +99,11 @@ def slugify(text: str) -> str:
 
 def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
     prefix = f"{slugify(job.company)}-{slugify(job.title)}-"
-    matches = [d for d in dirs if d.name.startswith(prefix)]
-    return matches[-1] if matches else None  # dir names end in a date: latest wins
+    matches = [
+        d for d in dirs
+        if d.name.startswith(prefix) and DATE_RE.fullmatch(d.name[len(prefix):])
+    ]
+    return max(matches, key=lambda d: d.name) if matches else None  # latest date wins
 
 
 def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, int]:
@@ -126,22 +131,28 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, in
         if job_dir is not None:
             posting, people = parse_job_dir(job_dir)
             if posting:
-                job = job.model_copy(update={"description": posting})
+                row = conn.execute(
+                    "SELECT description FROM jobs WHERE url = ?", (normalize_url(job.url),)
+                ).fetchone()
+                if row is None or not (row["description"] or "").strip():
+                    job = job.model_copy(update={"description": posting})
 
         job_id, is_new = upsert_job(conn, job)
         counts["jobs"] += 1
         counts["new"] += int(is_new)
-        save_fit(
-            conn,
-            Fit(
-                job_id=job_id,
-                keyword_score=0,
-                llm_score=item.score,
-                reasons=item.reason,
-                model="proficiently-import",
-                graded_at=now,
-            ),
-        )
+        existing_fit = get_fit(conn, job_id)
+        if existing_fit is None or existing_fit.model == IMPORT_MODEL:  # never clobber a real grade
+            save_fit(
+                conn,
+                Fit(
+                    job_id=job_id,
+                    keyword_score=0,
+                    llm_score=item.score,
+                    reasons=item.reason,
+                    model=IMPORT_MODEL,
+                    graded_at=now,
+                ),
+            )
         for person in people:
             upsert_person(conn, person.model_copy(update={"company": job.company, "job_id": job_id}))
             counts["people"] += 1
