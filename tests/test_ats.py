@@ -105,3 +105,34 @@ def test_lever_non_usd_flag():
     jobs = ats.fetch_jobs(Company(name="WeRide", ats="lever", slug="weride"), _client())
     assert jobs[0].flags == ["non_usd"]
     assert jobs[1].flags == []
+
+
+@respx.mock
+@pytest.mark.parametrize("ats_name,url,payload", [
+    ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/x/jobs",
+     {"jobs": [{"title": None, "absolute_url": "https://a.test/1"},
+               {"title": "Good", "absolute_url": "https://a.test/2"}]}),
+    ("ashby", "https://api.ashbyhq.com/posting-api/job-board/x",
+     {"jobs": [{"title": None, "jobUrl": "https://a.test/1"},
+               {"title": "Good", "jobUrl": "https://a.test/2"}]}),
+    ("lever", "https://api.lever.co/v0/postings/x",
+     [{"text": None, "hostedUrl": "https://a.test/1"},
+      {"text": "Bad salary", "hostedUrl": "https://a.test/3", "salaryRange": {"min": "abc"}},
+      {"text": "Good", "hostedUrl": "https://a.test/2"}]),
+])
+def test_bad_posting_is_skipped_not_fatal(ats_name, url, payload):
+    respx.get(re.compile(re.escape(url))).respond(json=payload)
+    stats = {}
+    jobs = ats.fetch_jobs(Company(name="X", ats=ats_name, slug="x"), _client(), stats)
+    assert [j.title for j in jobs] == ["Good"]
+    assert stats["skipped"] == (2 if ats_name == "lever" else 1)
+
+
+@respx.mock
+def test_unknown_slug_404_and_unexpected_shape():
+    respx.get("https://api.lever.co/v0/postings/nope").respond(404)
+    with pytest.raises(ats.FetchError, match="HTTP 404"):
+        ats.fetch_jobs(Company(name="X", ats="lever", slug="nope"), _client())
+    respx.get("https://api.ashbyhq.com/posting-api/job-board/x").respond(json={"wrong": 1})
+    with pytest.raises(ats.FetchError, match="unexpected response shape"):
+        ats.fetch_jobs(Company(name="X", ats="ashby", slug="x"), _client())

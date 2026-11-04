@@ -32,84 +32,77 @@ def _strip_html(text: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _greenhouse(co: Company, data) -> list[Job]:
-    return [
-        Job(
-            company=co.name,
-            title=j["title"],
-            url=j["absolute_url"],
-            location=(j.get("location") or {}).get("name"),
-            description=_strip_html(j.get("content")),
-            source="greenhouse",
-            posted_at=j.get("updated_at"),
-        )
-        for j in data["jobs"]
-    ]
+# One malformed posting must not sink the board: it is skipped and counted.
+_BAD_POSTING = (KeyError, TypeError, AttributeError, ValueError)  # ValueError incl. ValidationError
 
 
-def _ashby(co: Company, data) -> list[Job]:
-    jobs = []
-    for j in data["jobs"]:
-        locs = [j.get("location")] + [
-            s.get("location") for s in j.get("secondaryLocations") or []
-        ]
-        location = "; ".join(l for l in locs if l) or None
-        desc = j.get("descriptionPlain") or ""
-        summary = (j.get("compensation") or {}).get("compensationTierSummary")
-        if summary:
-            desc = f"Compensation: {summary}\n\n{desc}"
-        jobs.append(
-            Job(
-                company=co.name,
-                title=j["title"],
-                url=j["jobUrl"],
-                location=location,
-                description=desc,
-                source="ashby",
-                posted_at=j.get("publishedAt"),
-            )
-        )
-    return jobs
+def _greenhouse_job(co: Company, j) -> Job:
+    return Job(
+        company=co.name,
+        title=j["title"],
+        url=j["absolute_url"],
+        location=(j.get("location") or {}).get("name"),
+        description=_strip_html(j.get("content")),
+        source="greenhouse",
+        posted_at=j.get("updated_at"),
+    )
 
 
-def _lever(co: Company, data) -> list[Job]:
-    jobs = []
-    for j in data:
-        sr = j.get("salaryRange") or {}
-        created = j.get("createdAt")
-        posted = (
-            datetime.fromtimestamp(created / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-            if created
-            else None
-        )
-        jobs.append(
-            Job(
-                company=co.name,
-                title=j["text"],
-                url=j["hostedUrl"],
-                location=(j.get("categories") or {}).get("location"),
-                salary_min=int(sr["min"]) if sr.get("min") is not None else None,
-                salary_max=int(sr["max"]) if sr.get("max") is not None else None,
-                description=j.get("descriptionPlain"),
-                source="lever",
-                posted_at=posted,
-                flags=["non_usd"] if sr.get("currency") and sr["currency"].upper() != "USD" else [],
-            )
-        )
-    return jobs
+def _ashby_job(co: Company, j) -> Job:
+    locs = [j.get("location")] + [s.get("location") for s in j.get("secondaryLocations") or []]
+    location = "; ".join(l for l in locs if l) or None
+    desc = j.get("descriptionPlain") or ""
+    summary = (j.get("compensation") or {}).get("compensationTierSummary")
+    if summary:
+        desc = f"Compensation: {summary}\n\n{desc}"
+    return Job(
+        company=co.name,
+        title=j["title"],
+        url=j["jobUrl"],
+        location=location,
+        description=desc,
+        source="ashby",
+        posted_at=j.get("publishedAt"),
+    )
 
 
+def _lever_job(co: Company, j) -> Job:
+    sr = j.get("salaryRange") or {}
+    created = j.get("createdAt")
+    posted = (
+        datetime.fromtimestamp(created / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        if created
+        else None
+    )
+    return Job(
+        company=co.name,
+        title=j["text"],
+        url=j["hostedUrl"],
+        location=(j.get("categories") or {}).get("location"),
+        salary_min=int(sr["min"]) if sr.get("min") is not None else None,
+        salary_max=int(sr["max"]) if sr.get("max") is not None else None,
+        description=j.get("descriptionPlain"),
+        source="lever",
+        posted_at=posted,
+        flags=["non_usd"] if sr.get("currency") and sr["currency"].upper() != "USD" else [],
+    )
+
+
+# (url template, function selecting the posting list from the response, per-posting parser)
 _ENDPOINTS = {
-    "greenhouse": ("https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true", _greenhouse),
-    "ashby": ("https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true", _ashby),
-    "lever": ("https://api.lever.co/v0/postings/{slug}?mode=json", _lever),
+    "greenhouse": ("https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
+                   lambda d: d["jobs"], _greenhouse_job),
+    "ashby": ("https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true",
+              lambda d: d["jobs"], _ashby_job),
+    "lever": ("https://api.lever.co/v0/postings/{slug}?mode=json", lambda d: list(d), _lever_job),
 }
 
 
-def fetch_jobs(company: Company, client: httpx.Client) -> list[Job]:
+def fetch_jobs(company: Company, client: httpx.Client, stats: dict | None = None) -> list[Job]:
+    """`stats["skipped"]` is incremented for each malformed posting that was dropped."""
     if company.ats not in _ENDPOINTS or not company.slug:
         raise FetchError(company.name, "no ATS/slug configured")
-    template, parse = _ENDPOINTS[company.ats]
+    template, select, parse_one = _ENDPOINTS[company.ats]
     try:
         resp = client.get(template.format(slug=company.slug))
         resp.raise_for_status()
@@ -123,9 +116,17 @@ def fetch_jobs(company: Company, client: httpx.Client) -> list[Job]:
     except ValueError:
         raise FetchError(company.name, "bad JSON") from None
     try:
-        return parse(company, data)
-    except (KeyError, TypeError, AttributeError) as e:
+        items = select(data)
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
         raise FetchError(company.name, f"unexpected response shape: {e!r}") from None
+    jobs = []
+    for item in items:
+        try:
+            jobs.append(parse_one(company, item))
+        except _BAD_POSTING:
+            if stats is not None:
+                stats["skipped"] = stats.get("skipped", 0) + 1
+    return jobs
 
 
 def load_watchlist(path: Path) -> list[Company]:

@@ -85,3 +85,28 @@ def test_scan_uses_watchlist_and_injected_client(conn, tmp_path):
     with httpx.Client() as client:
         report = scan.run_scan(conn, s, client)
     assert report.companies_scanned == 1 and report.jobs_new == 1
+
+
+@respx.mock
+def test_scan_survives_bad_posting_and_unexpected_exception(conn, tmp_path, monkeypatch):
+    _setup(conn)
+    payload = _ashby_payload()
+    payload["jobs"].insert(0, {"id": "bad", "title": None, "jobUrl": "https://jobs.ashbyhq.com/harvey/bad"})
+    respx.get(ASHBY).respond(json=payload)
+    respx.get(GH).respond(json={"jobs": []})
+    s = _settings(tmp_path)
+    report = scan.run_scan(conn, s)
+    assert report.jobs_new == 1 and report.jobs_skipped == 1 and not report.errors
+
+    real = scan.ats.fetch_jobs
+
+    def flaky(co, client, stats=None):
+        if co.name == "A":
+            raise RuntimeError("boom")
+        return real(co, client, stats)
+
+    monkeypatch.setattr(scan.ats, "fetch_jobs", flaky)
+    report = scan.run_scan(conn, s)
+    assert "boom" in report.errors["A"] and "B" not in report.errors
+    assert report.companies_scanned == 2
+    assert {c.name: c.last_error for c in db.list_companies(conn)}["A"].startswith("unexpected error")

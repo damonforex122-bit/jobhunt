@@ -19,6 +19,7 @@ class ScanReport:
     jobs_seen: int = 0
     jobs_kept: int = 0
     jobs_new: int = 0
+    jobs_skipped: int = 0
     errors: dict[str, str] = field(default_factory=dict)
     new_jobs: list[dict] = field(default_factory=list)
 
@@ -48,12 +49,19 @@ def run_scan(
     try:
         for co in companies:
             report.companies_scanned += 1
+            stats: dict = {}
             try:
-                jobs = ats.fetch_jobs(co, client)
+                jobs = ats.fetch_jobs(co, client, stats)
             except ats.FetchError as e:
                 report.errors[co.name] = e.reason
                 db.set_company_scan(conn, co.name, error=e.reason)
                 continue
+            except Exception as e:  # never let one company abort the scan
+                reason = f"unexpected error: {type(e).__name__}: {e}"[:200]
+                report.errors[co.name] = reason
+                db.set_company_scan(conn, co.name, error=reason)
+                continue
+            report.jobs_skipped += stats.get("skipped", 0)
             for job in jobs:
                 report.jobs_seen += 1
                 job = _fill_salary(job)
@@ -92,6 +100,7 @@ def register(sub) -> None:
         print(
             f"Scanned {report.companies_scanned} companies: {report.jobs_seen} jobs seen, "
             f"{report.jobs_kept} kept, {report.jobs_new} new"
+            + (f", {report.jobs_skipped} malformed skipped" if report.jobs_skipped else "")
         )
         if report.errors:
             print("Errors:")
