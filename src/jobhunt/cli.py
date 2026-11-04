@@ -35,3 +35,7 @@ def main_entry() -> None:
 from . import scan  # noqa: E402
 
 REGISTRARS.append(scan.register)
+
+from . import fit  # noqa: E402
+
+REGISTRARS.append(fit.register)

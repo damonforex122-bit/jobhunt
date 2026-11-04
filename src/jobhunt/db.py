@@ -213,3 +213,8 @@ def list_people(conn: sqlite3.Connection, company: str) -> list[Person]:
         "SELECT * FROM people WHERE company = ? ORDER BY confidence DESC, name", (company,)
     ).fetchall()
     return [Person(**dict(r)) for r in rows]
+
+
+def set_job_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
+    conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
+    conn.commit()
