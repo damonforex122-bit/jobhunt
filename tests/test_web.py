@@ -90,6 +90,7 @@ def test_post_status_valid_persists(client, settings):
     assert r.status_code in (200, 303)
     conn = db.connect(settings.db_path)
     assert db.get_job(conn, 1)["status"] == "applied"
+    conn.close()
 
 
 def test_banner_shows_missing_keys(client):
