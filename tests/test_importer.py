@@ -1,0 +1,79 @@
+from pathlib import Path
+
+from jobhunt import db
+from jobhunt.importer import parse_job_dir, parse_job_history, run_import
+
+FIX = Path(__file__).parent / "fixtures" / "proficiently"
+AQ_DIR = FIX / "jobs" / "afterquery-research-scientist-frontier-evaluations-2026-10-30"
+
+
+def test_parse_job_history_both_table_shapes():
+    imported = parse_job_history((FIX / "job-history.md").read_text())
+    by_title = {i.job.title: i for i in imported}
+    seven_col = [i for i in imported if i.job.company in {"Exa", "Variance", "Applied Compute"}]
+    phd_col = [i for i in imported if i.job.company in {"AfterQuery", "Snorkel AI", "Mercor"}]
+    assert len(seven_col) >= 2 and len(phd_col) >= 2
+
+    exa = by_title["Research, Evals"]
+    assert (exa.score, exa.job.status, exa.job.source) == (8, "needs", "import")
+    assert exa.job.first_seen == "2026-10-30"
+    assert exa.reason and exa.reason.startswith("Strong overlap")
+
+    aq = by_title["Research Scientist - Frontier Evaluations"]
+    assert (aq.score, aq.job.status) == (8, "ready")
+    assert aq.reason and aq.reason.startswith("Strong overlap")  # not the PhD column
+
+
+def test_parse_job_history_skips_rows_without_url():
+    text = (
+        "| Company | Role | Score | Job URL | Date | Status | Reason |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| A | Role A | 7 | | 2026-01-01 | low | no url |\n"
+        "| B | Role B | x | https://jobs.lever.co/b/1 | 2026-01-01 | weird | ok |\n"
+    )
+    imported = parse_job_history(text)
+    assert [i.job.company for i in imported] == ["B"]
+    assert imported[0].score is None and imported[0].job.status == "weird"
+
+
+def test_parse_people_md():
+    posting, people = parse_job_dir(AQ_DIR)
+    assert posting
+    assert len(people) == 1
+    p = people[0]
+    assert p.name == "Spencer Mateega"
+    assert p.source_url == "https://yespress.io/spencer-mateega.md"
+    assert (p.source, p.confidence) == ("exa", 0.5)
+    assert p.title.startswith("Co-founder")
+
+
+def test_parse_job_dir_missing_posting(tmp_path):
+    assert parse_job_dir(tmp_path) == (None, [])
+
+
+def test_run_import_idempotent(conn):
+    first = run_import(conn, FIX)
+    assert first["jobs"] >= 4 and first["new"] == first["jobs"]
+    count = len(db.list_jobs(conn))
+    second = run_import(conn, FIX)
+    assert second["new"] == 0
+    assert len(db.list_jobs(conn)) == count
+
+    aq = next(c for c in db.list_companies(conn) if c.name == "AfterQuery")
+    assert (aq.ats, aq.slug) == ("ashby", "AfterQuery")
+    job = next(j for j in db.list_jobs(conn) if j["company"] == "AfterQuery")
+    assert job["description"]
+    fit = db.get_fit(conn, job["id"])
+    assert fit.llm_score == 8 and fit.keyword_score == 0 and fit.model == "proficiently-import"
+    assert [p.name for p in db.list_people(conn, "AfterQuery")] == ["Spencer Mateega"]
+
+
+def test_run_import_never_writes(conn):
+    def snap():
+        return sorted(
+            (str(p), p.stat().st_mtime_ns, p.stat().st_size)
+            for p in FIX.rglob("*") if p.is_file()
+        )
+    before = snap()
+    run_import(conn, FIX)
+    assert snap() == before

@@ -6,6 +6,10 @@ from collections.abc import Callable
 Registrar = Callable[[argparse._SubParsersAction], None]
 REGISTRARS: list[Registrar] = []
 
+from . import importer  # noqa: E402
+
+REGISTRARS.append(importer.register)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jobhunt", description="Local job-search tool")

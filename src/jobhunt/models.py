@@ -53,3 +53,11 @@ class Fit(BaseModel):
     model: str | None = None
     graded_at: str
     error: str | None = None
+
+
+class Preferences(BaseModel):
+    locations: list[str]
+    salary_floor: int
+    search_terms: list[str]
+    excluded_terms: list[str]
+    target_roles: list[str] = []
