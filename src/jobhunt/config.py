@@ -8,7 +8,7 @@ class Settings(BaseModel):
     proficiently_dir: Path = Path("~/Documents/Resume/.proficiently").expanduser()
     db_path: Path = Path("data/jobhunt.db")
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     apollo_api_key: str | None = None
     exa_api_key: str | None = None
     watchlist_path: Path = Path("config/watchlist.yaml")

@@ -49,7 +49,7 @@ A missing key turns that feature off with a banner in the UI; nothing crashes.
 
 | Variable | Turns on |
 | --- | --- |
-| `GEMINI_API_KEY` (`GEMINI_MODEL`, default `gemini-2.5-flash`) | LLM fit score (1-10), match %, rewritten bullets. Without it you still get the keyword score. |
+| `GEMINI_API_KEY` (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`) | LLM fit score (1-10), match %, rewritten bullets. Without it you still get the keyword score. |
 | `APOLLO_API_KEY` | Apollo people search for hiring-manager candidates (names may be partly obfuscated, shown as-is). |
 | `EXA_API_KEY` | Exa web search for hiring-manager candidates. |
 

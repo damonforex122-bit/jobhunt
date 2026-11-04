@@ -37,7 +37,7 @@ def settings(key="k"):
 def resp(score=8):
     return FitResponse(
         match_pct=72, fit_score=score, missing_keywords=["databricks"],
-        rewritten_bullets=[Bullet(original="o", rewritten="r", keywords_used=["aws"])],
+        rewritten_bullets=[Bullet(original=RESUME, rewritten="r", keywords_used=["aws"])],
         reasons="good", gaps="none",
     )
 
@@ -54,11 +54,11 @@ def test_grade_success_with_fake_client():
     c = FakeClient(parsed=resp(8))
     fit = grade(JOB, RESUME, settings(), client=c)
     assert (fit.llm_score, fit.match_pct, fit.error) == (8, 72, None)
-    assert fit.model == "gemini-2.5-flash"
+    assert fit.model == "gemini-3.5-flash-lite"
     assert fit.keyword_score == 50
-    assert fit.rewritten_bullets == [{"original": "o", "rewritten": "r", "keywords_used": ["aws"]}]
+    assert fit.rewritten_bullets == [{"original": RESUME, "rewritten": "r", "keywords_used": ["aws"]}]
     assert c.models.kwargs["config"]["response_schema"] is FitResponse
-    assert c.models.kwargs["model"] == "gemini-2.5-flash"
+    assert c.models.kwargs["model"] == "gemini-3.5-flash-lite"
 
 
 def test_grade_no_key():
@@ -122,3 +122,42 @@ def test_response_schema_has_no_defaults_or_max_items():
 
     schema = json.dumps(FitResponse.model_json_schema())
     assert '"default"' not in schema and "maxItems" not in schema
+
+
+REAL = "Cut analysis time from 5 hours to 30 minutes across 1,000 transcripts."
+
+
+def bullets_resp(*bullets):
+    return FitResponse(match_pct=70, fit_score=8, missing_keywords=["calibration"],
+                       rewritten_bullets=list(bullets), reasons="ok", gaps="No calibration work.")
+
+
+def test_prompt_forbids_unsupported_keywords_and_new_numbers():
+    p = build_prompt(RESUME, "posting", "Co", "Role")
+    assert "verbatim" in p
+    assert "belongs in gaps" in p
+    assert "no new numbers" in p
+
+
+def test_grade_keeps_bullet_grounded_in_resume():
+    b = Bullet(original=REAL, rewritten="Reduced eval analysis time from 5 hours to 30 minutes "
+               "across 1,000 transcripts.", keywords_used=["eval"])
+    fit = grade(JOB, "Intro.\n" + REAL + "\nMore.", settings(), client=FakeClient(parsed=bullets_resp(b)))
+    assert len(fit.rewritten_bullets) == 1
+    assert fit.gaps == "No calibration work."
+
+
+def test_grade_drops_bullet_whose_original_is_not_in_resume():
+    b = Bullet(original="Built fraud risk workflows for banks.", rewritten="Built risk workflows.",
+               keywords_used=["risk workflows"])
+    fit = grade(JOB, REAL, settings(), client=FakeClient(parsed=bullets_resp(b)))
+    assert fit.rewritten_bullets == []
+    assert "1 rewritten bullet" in fit.gaps and "not in your resume" in fit.gaps
+
+
+def test_grade_drops_bullet_that_adds_numbers():
+    b = Bullet(original=REAL, rewritten="Measured calibration across 2,000 outputs, cutting time "
+               "from 5 hours to 30 minutes across 1,000 transcripts.", keywords_used=["calibration"])
+    fit = grade(JOB, REAL, settings(), client=FakeClient(parsed=bullets_resp(b)))
+    assert fit.rewritten_bullets == []
+    assert "2,000" in fit.gaps

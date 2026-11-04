@@ -9,7 +9,7 @@ def test_env_overrides_dotenv_and_empty_is_unset(tmp_path, monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     s = load_settings(env)
     assert s.gemini_api_key == "fromenv"
-    assert s.gemini_model == "gemini-2.5-flash"
+    assert s.gemini_model == "gemini-3.5-flash-lite"
     assert s.exa_api_key == "q"
     assert s.apollo_api_key is None
 
