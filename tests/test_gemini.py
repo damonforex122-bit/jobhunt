@@ -115,3 +115,10 @@ def test_grade_job_error_saved_status_unchanged(conn, job_id, s):
     assert fit.error
     assert db.get_fit(conn, job_id).error == fit.error
     assert db.get_job(conn, job_id)["status"] == "new"
+
+
+def test_response_schema_has_no_defaults_or_max_items():
+    import json
+
+    schema = json.dumps(FitResponse.model_json_schema())
+    assert '"default"' not in schema and "maxItems" not in schema

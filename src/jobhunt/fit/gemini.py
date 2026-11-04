@@ -11,13 +11,13 @@ from .keywords import keyword_fit
 class Bullet(BaseModel):
     original: str
     rewritten: str
-    keywords_used: list[str] = []
+    keywords_used: list[str]
 
 
 class FitResponse(BaseModel):
     match_pct: int = Field(ge=0, le=100)
     fit_score: int = Field(ge=1, le=10)
-    missing_keywords: list[str] = Field(max_length=10)
+    missing_keywords: list[str]
     rewritten_bullets: list[Bullet]
     reasons: str
     gaps: str
