@@ -37,19 +37,19 @@ def search_people(
     people: list[Person] = []
     for p in (data.get("people") or []) if isinstance(data, dict) else []:
         first = (p.get("first_name") or "").strip()
-        last = (p.get("last_name") or "").strip()  # obfuscated variant is never used
-        if not first or not last or "*" in last:
-            continue
-        linkedin = p.get("linkedin_url") or None
         pid = p.get("id")
-        source_url = linkedin or (f"https://app.apollo.io/#/people/{pid}" if pid else None)
-        if not source_url:
+        if not first or not pid:
             continue
+        last = (p.get("last_name") or "").strip()
+        full = bool(last) and "*" not in last
+        if not full:
+            last = (p.get("last_name_obfuscated") or "").strip()
+        linkedin = p.get("linkedin_url") or None
         people.append(
             Person(
-                company=company.name, name=f"{first} {last}", title=p.get("title"),
-                source="apollo", source_url=source_url, linkedin_url=linkedin,
-                confidence=0.8,
+                company=company.name, name=f"{first} {last}".strip(), title=p.get("title"),
+                source="apollo", source_url=f"https://app.apollo.io/#/people/{pid}",
+                linkedin_url=linkedin, confidence=0.8 if full else 0.6,
             )
         )
     return people

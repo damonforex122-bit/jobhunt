@@ -46,15 +46,16 @@ def test_manager_titles_evals():
 @respx.mock
 def test_apollo_maps_people():
     route = respx.post(APOLLO).mock(return_value=httpx.Response(200, json={"people": [
-        {"id": "a1", "first_name": "Jane", "last_name": "Doe", "title": "Head of Evals"},
-        {"id": "a2", "first_name": "Bob", "last_name": "", "last_name_obfuscated": "Sm***h"},
+        {"id": "a1", "first_name": "Jane", "last_name_obfuscated": "Do***e", "title": "Head of Evals"},
+        {"id": "a2", "first_name": "", "last_name_obfuscated": "Sm***h", "title": "CTO"},
     ]}))
     co = Company(name="Acme", domain="acme.com")
     with httpx.Client() as c:
         ps = apollo.search_people(co, ["Head of Evals"], "k", c)
     assert len(ps) == 1
     p = ps[0]
-    assert p.source == "apollo" and p.name == "Jane Doe"
+    assert p.source == "apollo" and p.name == "Jane Do***e"
+    assert p.confidence == 0.6 and p.linkedin_url is None
     assert p.source_url == "https://app.apollo.io/#/people/a1"
     req = route.calls[0].request
     assert "acme.com" in str(req.url) + req.content.decode()
