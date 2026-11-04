@@ -86,13 +86,20 @@ def _role_keywords(roles: list[str], excluded: list[str]) -> list[str]:
     return keywords
 
 
+_TECH_ROLE_RE = re.compile(
+    r"(?<![a-z0-9])(engineers?|engineering|scientists?|researchers?|research|member of technical staff"
+    r"|mts|applied ai|forward[- ]deployed)(?![a-z0-9])",
+    re.I,
+)
+
+
 def title_match(title: str, description: str | None, prefs: Preferences) -> bool:
     terms = [t for t in prefs.search_terms if not any(_contains(t, x) for x in prefs.excluded_terms)]
     title_phrases = [f for t in terms for f in _singular_forms(t)]
     title_phrases += _role_keywords(prefs.target_roles, prefs.excluded_terms)
     if any(_contains(title, p) for p in title_phrases):
         return True
-    if description:
+    if description and _TECH_ROLE_RE.search(title):
         hits = sum(any(_contains(description, f) for f in _singular_forms(t)) for t in terms)
         return hits >= 2
     return False
@@ -109,6 +116,11 @@ def evaluate(job: Job, prefs: Preferences) -> tuple[bool, list[str]]:
         flags.append("location_unknown")
     if not title_match(job.title, job.description, prefs):
         return False, []
+    if any(_contains(job.title, x) for x in prefs.excluded_terms):
+        flags.append("excluded_term")
+    if "non_usd" in job.flags:
+        flags.append("non_usd")
+        return True, flags  # floor is in USD; skip the check
     floor = prefs.salary_floor
     if job.salary_max is not None and job.salary_max < floor:
         return False, []

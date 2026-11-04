@@ -76,3 +76,24 @@ def test_title_match_ignores_excluded_terms():
     assert filters.title_match("Applied Scientist", None, PREFS) is True
     assert filters.title_match("Software Engineer", "We build benchmarks and run evals.", PREFS) is True
     assert filters.title_match("Software Engineer", "We run evals.", PREFS) is False
+
+
+def test_description_route_requires_technical_title():
+    desc = "We build evals and benchmarks."
+    assert filters.title_match("Marketing Lead", desc, PREFS) is False
+    assert filters.title_match("Recruiter", desc, PREFS) is False
+    assert filters.title_match("Software Engineer", desc, PREFS) is True
+
+
+def test_excluded_term_flagged_not_dropped():
+    keep, flags = filters.evaluate(_job(title="Research Engineer, RL Evals"), PREFS)
+    assert keep and "excluded_term" in flags
+    keep, flags = filters.evaluate(_job(title="Research Engineer, Control Evals"), PREFS)
+    assert keep and "excluded_term" not in flags
+    keep, flags = filters.evaluate(_job(title="Research Engineer, URL Evals"), PREFS)
+    assert "excluded_term" not in flags
+
+
+def test_non_usd_skips_floor():
+    keep, flags = filters.evaluate(_job(salary_min=50000, salary_max=90000, flags=["non_usd"]), PREFS)
+    assert keep and flags == ["non_usd"]

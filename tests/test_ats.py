@@ -95,3 +95,13 @@ def test_load_watchlist_seed():
     cos = ats.load_watchlist(Path(__file__).parent.parent / "config" / "watchlist.yaml")
     assert [c.name for c in cos] == ["Anthropic", "Harvey", "Mercor"]
     assert cos[0].ats == "greenhouse" and cos[0].domain == "anthropic.com"
+
+
+@respx.mock
+def test_lever_non_usd_flag():
+    data = _fx("lever")
+    data[0]["salaryRange"]["currency"] = "GBP"
+    respx.get("https://api.lever.co/v0/postings/weride").respond(json=data)
+    jobs = ats.fetch_jobs(Company(name="WeRide", ats="lever", slug="weride"), _client())
+    assert jobs[0].flags == ["non_usd"]
+    assert jobs[1].flags == []

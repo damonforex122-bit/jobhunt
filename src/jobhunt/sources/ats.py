@@ -93,6 +93,7 @@ def _lever(co: Company, data) -> list[Job]:
                 description=j.get("descriptionPlain"),
                 source="lever",
                 posted_at=posted,
+                flags=["non_usd"] if sr.get("currency") and sr["currency"].upper() != "USD" else [],
             )
         )
     return jobs
