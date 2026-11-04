@@ -1,5 +1,6 @@
 """Local web UI. One sqlite connection per request; routes reach the slow actions
 (grade, find people, scan, import) through small dependency functions so tests can override them."""
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
@@ -16,6 +17,15 @@ from ..people.finder import find_people
 
 STATUSES = ("new", "ready", "needs", "low", "applied", "skip")
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def safe_url(value: str | None) -> str:
+    """Only http(s) URLs may reach an href; anything else (javascript:, data:, ...) becomes ''."""
+    v = (value or "").strip()
+    return v if re.match(r"https?://", v, re.I) else ""
+
+
+TEMPLATES.env.filters["safe_url"] = safe_url
 
 
 # --- overridable action dependencies ---------------------------------------

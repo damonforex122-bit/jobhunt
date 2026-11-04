@@ -2,7 +2,7 @@
 <h1>{{ job.title }} <small>@ {{ job.company }}</small></h1>
 <p>{{ job.location or '' }} {% with flags=job.flags %}{% include "_flags.html" %}{% endwith %}
 {% if job.salary_min or job.salary_max %}<span class="badge">${{ job.salary_min or '?' }}&ndash;{{ job.salary_max or '?' }}</span>{% endif %}
-<a href="{{ job.url }}" rel="noopener noreferrer">posting</a></p>
+<a href="{{ job.url|safe_url }}" rel="noopener noreferrer">posting</a></p>
 <form method="post" action="/jobs/{{ job.id }}/status">
   <select name="status" onchange="this.form.submit()">
   {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == job.status }}>{{ s }}</option>{% endfor %}</select>

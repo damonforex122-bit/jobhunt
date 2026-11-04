@@ -4,7 +4,7 @@
 {% if people %}<table><tr><th>Name</th><th>Title</th><th>Source</th><th>Link</th></tr>
 {% for p in people %}<tr><td>{{ p.name }}</td><td>{{ p.title or '' }}</td>
 <td><span class="badge">{{ p.source }}</span></td>
-<td><a href="{{ p.source_url }}" rel="noopener noreferrer">source</a>{% if p.linkedin_url %} <a href="{{ p.linkedin_url }}" rel="noopener noreferrer">LinkedIn</a>{% endif %}</td></tr>{% endfor %}</table>
+<td><a href="{{ p.source_url|safe_url }}" rel="noopener noreferrer">source</a>{% if p.linkedin_url %} <a href="{{ p.linkedin_url|safe_url }}" rel="noopener noreferrer">LinkedIn</a>{% endif %}</td></tr>{% endfor %}</table>
 {% else %}<p>No people found yet.</p>{% endif %}
 <button hx-post="/jobs/{{ job.id }}/people" hx-target="#people" hx-swap="outerHTML">Find people</button>
 </div>

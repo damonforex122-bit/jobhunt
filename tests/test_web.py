@@ -123,3 +123,30 @@ def test_post_import_redirects_with_flash(settings):
     app.dependency_overrides[webapp.get_importer] = lambda: lambda conn, d: {"jobs": 5}
     r = TestClient(app).post("/import", follow_redirects=True)
     assert "Import" in r.text and "jobs" in r.text
+
+
+@pytest.mark.parametrize("bad", ["javascript:alert(1)", " JavaScript:x", "data:text/html,<script>x</script>",
+                                 "java\tscript:alert(1)", "", None])
+def test_safe_url_rejects(bad):
+    assert webapp.safe_url(bad) == ""
+
+
+def test_safe_url_accepts():
+    assert webapp.safe_url(" https://example.com/a?b=1 ") == "https://example.com/a?b=1"
+    assert webapp.safe_url("HTTP://example.com") == "HTTP://example.com"
+
+
+def test_hostile_urls_not_rendered_in_href(settings):
+    import re
+
+    conn = db.connect(settings.db_path)
+    db.upsert_person(conn, Person(company="AfterQuery", job_id=1, name="Evil Person", source="exa",
+                                  source_url="javascript:alert(1)",
+                                  linkedin_url="data:text/html,x", confidence=0.5))
+    db.upsert_job(conn, Job(company="Evil", title="Bad", url="javascript:alert(2)", source="ats"))
+    conn.close()
+    c = TestClient(webapp.create_app(settings))
+    for path in ("/jobs/1", "/jobs/3"):
+        html = c.get(path).text
+        assert "Evil Person" in html or path == "/jobs/3"
+        assert not re.search(r'href="\s*(javascript|data):', html, re.I)
