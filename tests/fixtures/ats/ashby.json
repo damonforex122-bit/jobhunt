@@ -1,0 +1,209 @@
+{
+ "jobs": [
+  {
+   "id": "50a8df2a-c50e-4326-ae90-0c9f8ee0cf1d",
+   "title": "Senior Product Security Engineer",
+   "department": "Security",
+   "team": "Security",
+   "employmentType": "FullTime",
+   "location": "San Francisco",
+   "shouldDisplayCompensationOnJobPostings": true,
+   "secondaryLocations": [
+    {
+     "location": "New York",
+     "address": {
+      "postalAddress": {
+       "addressRegion": "New York",
+       "addressCountry": "USA",
+       "addressLocality": "New York"
+      }
+     }
+    }
+   ],
+   "publishedAt": "2026-08-21T21:29:29.643+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressRegion": "California",
+     "addressCountry": "USA",
+     "addressLocality": "San Francisco"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/harvey/50a8df2a-c50e-4326-ae90-0c9f8ee0cf1d",
+   "applyUrl": "https://jobs.ashbyhq.com/harvey/50a8df2a-c50e-4326-ae90-0c9f8ee0cf1d/application",
+   "descriptionHtml": "<h1><strong>Why Harvey</strong></h1><p style=\"min-height:1.5em\">At Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.</p><p style=\"min-height:1.5em\">This is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.</p><p style=\"min-height:1.5em\">Our team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.</p><p style=\"min-height:1.5em\">At Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.</p><h1><strong>Role Overview</strong></h1><p style=\"min-height:1.5em\">As a Senior Software Engineer on the Product Security team at Harvey, you will have the opportunity to build security directly into the product. Harvey stores and processes our customers\u2019 most sensitive data and our entire business model depends on a foundation At Harvey, you will find that security is paramount at every stage of our product lifecycle. In this role you will drive high-leverage security initiatives that raise the bar for the entire company \u2014 balancing hands-on technical work with cross-functional leadership and mentorship. This is a rare opportunity to de",
+   "descriptionPlain": "WHY HARVEY\n\nAt Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.\n\nThis is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.\n\nOur team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.\n\nAt Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.\n\n\nROLE OVERVIEW\n\nAs a Senior Software Engineer on the Product Security team at Harvey, you will have the opportunity to build security directly into the product. Harvey stores and processes our customers\u2019 most sensitive data and our entire business model depends on a foundation At Harvey, you will find that security is paramount at every stage of our product lifecycle. In this role you will drive high-leverage security initiatives that raise the bar for the entire company \u2014 balancing hands-on technical work with cross-functional leadership and mentorship. This is a rare opportunity to design and build a world-class product security program at one of the fastest growing AI-native companies.\n\nThe Harvey Security organization has an engineering-first mindset and team members bring ",
+   "compensation": {
+    "compensationTierSummary": "$188K \u2013 $282K \u2022 Offers Equity \u2022 Offers Bonus",
+    "scrapeableCompensationSalarySummary": "$188K - $282K",
+    "compensationTiers": [
+     {
+      "id": "ba378027-a5c2-45a8-b1a7-f32890445765",
+      "tierSummary": "$188K \u2013 $282K \u2022 Offers Equity \u2022 Offers Bonus",
+      "title": null,
+      "additionalInformation": null,
+      "components": [
+       {
+        "id": "08eea7d4-f232-4e69-bb7b-3007cc3e325c",
+        "summary": "Offers Equity",
+        "compensationType": "EquityPercentage",
+        "interval": "NONE",
+        "currencyCode": null,
+        "minValue": null,
+        "maxValue": null
+       },
+       {
+        "id": "d0338759-bc81-4b76-8e53-28f97386f5b6",
+        "summary": "Offers Bonus",
+        "compensationType": "Bonus",
+        "interval": "1 YEAR",
+        "currencyCode": "USD",
+        "minValue": null,
+        "maxValue": null
+       },
+       {
+        "id": "6ae4c67a-309e-477e-86db-9b939e972ddb",
+        "summary": "$188K \u2013 $282K",
+        "compensationType": "Salary",
+        "interval": "1 YEAR",
+        "currencyCode": "USD",
+        "minValue": 188000,
+        "maxValue": 282000
+       }
+      ]
+     }
+    ],
+    "summaryComponents": [
+     {
+      "compensationType": "EquityPercentage",
+      "interval": "NONE",
+      "currencyCode": null,
+      "minValue": null,
+      "maxValue": null
+     },
+     {
+      "compensationType": "Bonus",
+      "interval": "1 YEAR",
+      "currencyCode": "USD",
+      "minValue": null,
+      "maxValue": null
+     },
+     {
+      "compensationType": "Salary",
+      "interval": "1 YEAR",
+      "currencyCode": "USD",
+      "minValue": 188000,
+      "maxValue": 282000
+     }
+    ]
+   }
+  },
+  {
+   "id": "977e6184-2dc4-422b-8ab3-bc26bb73f778",
+   "title": "Legal Engineering Manager (Law Firm, Litigation/Regulatory)",
+   "department": "Go to Market",
+   "team": "Go to Market",
+   "employmentType": "FullTime",
+   "location": "San Francisco",
+   "shouldDisplayCompensationOnJobPostings": true,
+   "secondaryLocations": [],
+   "publishedAt": "2026-09-29T16:53:31.101+00:00",
+   "isListed": true,
+   "isRemote": null,
+   "workplaceType": null,
+   "address": {
+    "postalAddress": {
+     "addressRegion": "California",
+     "addressCountry": "USA",
+     "addressLocality": "San Francisco"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/harvey/977e6184-2dc4-422b-8ab3-bc26bb73f778",
+   "applyUrl": "https://jobs.ashbyhq.com/harvey/977e6184-2dc4-422b-8ab3-bc26bb73f778/application",
+   "descriptionHtml": "<h1><strong>Why Harvey</strong></h1><p style=\"min-height:1.5em\">At Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.</p><p style=\"min-height:1.5em\">This is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.</p><p style=\"min-height:1.5em\">Our team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.</p><p style=\"min-height:1.5em\">At Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.</p><h1><strong>Role Overview</strong></h1><p style=\"min-height:1.5em\">As Harvey continues to scale its Legal Engineering function, we are hiring Legal Engineering Managers to lead and grow high-performing teams supporting our go-to-market efforts. This role sits at the intersection of legal expertise, customer engagement, and commercial strategy \u2014 helping prospective and existing customers understand how Harvey can transform the way legal work gets done.</p><p style=\"min-height:1.5em\">Legal Engineering Managers lead teams of Legal Engineers who partner closely with Account Executives throughout the sales process, bringing legal credibility",
+   "descriptionPlain": "WHY HARVEY\n\nAt Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.\n\nThis is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.\n\nOur team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.\n\nAt Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.\n\n\nROLE OVERVIEW\n\nAs Harvey continues to scale its Legal Engineering function, we are hiring Legal Engineering Managers to lead and grow high-performing teams supporting our go-to-market efforts. This role sits at the intersection of legal expertise, customer engagement, and commercial strategy \u2014 helping prospective and existing customers understand how Harvey can transform the way legal work gets done.\n\nLegal Engineering Managers lead teams of Legal Engineers who partner closely with Account Executives throughout the sales process, bringing legal credibility, product expertise, and consultative support to customer engagements. In addition to managing and developing the team, you will work directly with strategic customers, help shape Harvey\u2019s go-to-market approach, and partner c",
+   "compensation": {
+    "compensationTierSummary": "$315K \u2013 $385K \u2022 Offers Equity",
+    "scrapeableCompensationSalarySummary": "$315K - $385K",
+    "compensationTiers": [
+     {
+      "id": "b229d43b-530f-4cb9-b2a3-4a225060b6f0",
+      "tierSummary": "OTE 75/25 $315K \u2013 $385K \u2022 Offers Equity",
+      "title": null,
+      "additionalInformation": null,
+      "components": [
+       {
+        "id": "fede13c3-2d35-4cb4-a19e-d6ba21a5e763",
+        "summary": "Offers Equity",
+        "compensationType": "EquityPercentage",
+        "interval": "NONE",
+        "currencyCode": null,
+        "minValue": null,
+        "maxValue": null
+       },
+       {
+        "id": "f7a38bf2-1116-4372-a2a3-e0dd75e9a4eb",
+        "summary": "OTE 75/25 $315K \u2013 $385K",
+        "compensationType": "Salary",
+        "interval": "1 YEAR",
+        "currencyCode": "USD",
+        "minValue": 315000,
+        "maxValue": 385000
+       }
+      ]
+     }
+    ],
+    "summaryComponents": [
+     {
+      "compensationType": "EquityPercentage",
+      "interval": "NONE",
+      "currencyCode": null,
+      "minValue": null,
+      "maxValue": null
+     },
+     {
+      "compensationType": "Salary",
+      "interval": "1 YEAR",
+      "currencyCode": "USD",
+      "minValue": 315000,
+      "maxValue": 385000
+     }
+    ]
+   }
+  },
+  {
+   "id": "e04146f6-f79a-4023-9523-fe691038b330",
+   "title": "Customer Success Manager, Mid Market, EMEA",
+   "department": "Customer Success",
+   "team": "Customer Success",
+   "employmentType": "FullTime",
+   "location": "London",
+   "shouldDisplayCompensationOnJobPostings": false,
+   "secondaryLocations": [],
+   "publishedAt": "2026-02-25T09:45:38.623+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressRegion": "England",
+     "addressCountry": "United Kingdom",
+     "addressLocality": "London"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/harvey/e04146f6-f79a-4023-9523-fe691038b330",
+   "applyUrl": "https://jobs.ashbyhq.com/harvey/e04146f6-f79a-4023-9523-fe691038b330/application",
+   "descriptionHtml": "<h1><strong>Why Harvey</strong></h1><p style=\"min-height:1.5em\">At Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.</p><p style=\"min-height:1.5em\">This is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.</p><p style=\"min-height:1.5em\">Our team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.</p><p style=\"min-height:1.5em\">At Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.</p><p style=\"min-height:1.5em\"></p><h1><strong>Role Overview</strong></h1><p style=\"min-height:1.5em\">As a Mid Market Customer Success Manager at Harvey, you will own value realization for customers, helping to define the future of legal work at top enterprises and leading law firms. You\u2019ll act as a trusted expert and guide customers through the process of integrating AI into the daily workflows of lawyers and other professionals. You will not only help customers to identify use cases for Harvey, but also help transform the practice of law. You\u2019ll deeply integrate Harvey into your customers' business processes and workflows, build lasting ",
+   "descriptionPlain": "WHY HARVEY\n\nAt Harvey, we\u2019re transforming how legal and professional services operate. By combining frontier agentic AI, an enterprise-grade platform, and deep domain expertise, we\u2019re reshaping how critical knowledge work gets done for decades to come.\n\nThis is a rare chance to help build a generational company at a true inflection point. We have strong product-market fit and world-class investor support. We\u2019re scaling fast and defining a new category in real time. The work is ambitious, the bar is high, and the opportunity for growth \u2014 personal, professional, and financial \u2014 is unmatched.\n\nOur team moves fast, takes ownership, and is deeply committed to the mission \u2014 operating with intensity, staying close to our customers, and pushing each other for excellence. We live by three values: Decisiveness, Simplicity, and Job's Not Finished. We act quickly on clear judgment over perfect information, we believe simplicity is what scales, and we're never satisfied with where we are. If you want to do the best work of your career alongside people who share that drive, we'd love to build with you.\n\nAt Harvey, the future of professional services is being written today \u2014 and we\u2019re just getting started.\n\n\n\n\nROLE OVERVIEW\n\nAs a Mid Market Customer Success Manager at Harvey, you will own value realization for customers, helping to define the future of legal work at top enterprises and leading law firms. You\u2019ll act as a trusted expert and guide customers through the process of integrating AI into the daily workflows of lawyers and other professionals. You will not only help customers to identify use cases for Harvey, but also help transform the practice of law. You\u2019ll deeply integrate Harvey into your customers' business processes and workflows, build lasting relationships, and partner with Account Executives to renew and expand Harvey\u2019s strategic partnerships.\n\n\n\n\nWHAT YOU\u2019LL DO\n\n - Onboarding: Integrate Harvey into customer workflows, guide administrators with data-backed best p",
+   "compensation": {
+    "compensationTierSummary": null,
+    "scrapeableCompensationSalarySummary": null,
+    "compensationTiers": [],
+    "summaryComponents": []
+   }
+  }
+ ],
+ "apiVersion": "1"
+}

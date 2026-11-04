@@ -1,0 +1,3 @@
+- {name: Anthropic, ats: greenhouse, slug: anthropic, domain: anthropic.com}
+- {name: Harvey, ats: ashby, slug: harvey, domain: harvey.ai}
+- {name: Mercor, ats: ashby, slug: mercor, domain: mercor.com}
