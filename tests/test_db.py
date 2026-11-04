@@ -43,3 +43,15 @@ def test_upsert_person_dedup(conn):
     id2 = db.upsert_person(conn, p)
     assert id1 == id2
     assert len(db.list_people(conn, "Acme")) == 1
+
+
+def test_scan_upsert_clears_stale_flags(conn):
+    jid, _ = db.upsert_job(conn, job(source="ashby", flags=["remote"]))
+    db.upsert_job(conn, job(source="ashby", flags=[]))
+    assert db.get_job(conn, jid)["flags"] == []
+
+
+def test_import_upsert_keeps_flags(conn):
+    jid, _ = db.upsert_job(conn, job(source="ashby", flags=["remote"]))
+    db.upsert_job(conn, job(source="import", flags=[]))
+    assert db.get_job(conn, jid)["flags"] == ["remote"]

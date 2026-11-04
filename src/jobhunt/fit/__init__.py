@@ -13,6 +13,14 @@ def grade_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=
         raise ValueError(f"No job with id {job_id}")
     resume = load_resume_text(settings.proficiently_dir)
     fit = grade(job, resume, settings, client=client)
+    old = db.get_fit(conn, job_id)
+    if fit.llm_score is None and old is not None and old.llm_score is not None:
+        # a failed grade must not wipe an existing score: keep it, surface the error
+        fit = old.model_copy(update={
+            "keyword_score": fit.keyword_score,
+            "missing_keywords": fit.missing_keywords or old.missing_keywords,
+            "error": fit.error,
+        })
     db.save_fit(conn, fit)
     if fit.llm_score is not None and job["status"] == "new":
         db.set_job_status(conn, job_id, "ready" if fit.llm_score >= 8 else "low")
