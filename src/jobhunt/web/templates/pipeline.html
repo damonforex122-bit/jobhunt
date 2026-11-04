@@ -6,8 +6,8 @@
 {% if not gmail_connected %}<span class="muted">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
 {% if suggestions %}<table><tr><th>Email</th><th>Job</th><th>Move</th><th></th></tr>
 {% for s in suggestions %}<tr><td><span class="muted">{{ s.received }} &middot; {{ s.sender }}</span><br>{{ s.subject }}<br><span class="muted">{{ s.snippet }}</span></td>
-<td>{{ s.company }}<br><a href="/jobs/{{ s.job_id }}">{{ s.title }}</a></td>
-<td>{{ s.current_status }} &rarr; <b>{{ s.suggested_status }}</b></td>
+<td>{{ s.company }}<br>{% if s.job_id %}<a href="/jobs/{{ s.job_id }}">{{ s.title }}</a>{% else %}<span class="badge">new &mdash; Accept adds it to your pipeline</span>{% endif %}</td>
+<td>{{ s.current_status or 'not tracked' }} &rarr; <b>{{ s.suggested_status }}</b></td>
 <td><form method="post" action="/gmail/suggestions/{{ s.id }}/accept" style="display:inline"><button>Accept</button></form>
 <form method="post" action="/gmail/suggestions/{{ s.id }}/dismiss" style="display:inline"><button>Dismiss</button></form></td></tr>{% endfor %}
 </table>{% else %}<p class="muted">No suggestions right now.</p>{% endif %}

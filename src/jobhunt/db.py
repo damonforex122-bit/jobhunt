@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS gmail_messages (
     job_id INTEGER REFERENCES jobs(id),
     sender TEXT, subject TEXT, received TEXT, snippet TEXT,
     suggested_status TEXT,
+    company TEXT, title TEXT,  -- set when job_id is NULL: a company the app does not know yet
     state TEXT NOT NULL  -- ignored | pending | accepted | dismissed
 );
 """
@@ -75,7 +76,20 @@ def connect(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection
     conn = sqlite3.connect(path, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+# Columns added after a table first shipped: (table, column, type)
+_ADDED_COLUMNS = [("gmail_messages", "company", "TEXT"), ("gmail_messages", "title", "TEXT")]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, kind in _ADDED_COLUMNS:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    conn.commit()
 
 
 # --- companies -------------------------------------------------------------
@@ -282,8 +296,12 @@ def pipeline_board(conn: sqlite3.Connection) -> dict[str, list[dict]]:
 
 # --- gmail -----------------------------------------------------------------
 
-def gmail_seen_ids(conn: sqlite3.Connection) -> set[str]:
-    return {r[0] for r in conn.execute("SELECT gmail_id FROM gmail_messages")}
+def gmail_seen_ids(conn: sqlite3.Connection, *, settled_only: bool = False) -> set[str]:
+    """Emails not to fetch again. With settled_only, only ones you accepted or dismissed."""
+    sql = "SELECT gmail_id FROM gmail_messages"
+    if settled_only:
+        sql += " WHERE state IN ('accepted', 'dismissed')"
+    return {r[0] for r in conn.execute(sql)}
 
 
 def jobs_for_matching(conn: sqlite3.Connection) -> list[dict]:
@@ -293,24 +311,52 @@ def jobs_for_matching(conn: sqlite3.Connection) -> list[dict]:
 def save_gmail_message(conn: sqlite3.Connection, gmail_id: str, *, job_id: int | None = None,
                        sender: str | None = None, subject: str | None = None,
                        received: str | None = None, snippet: str | None = None,
-                       suggested_status: str | None = None) -> None:
+                       suggested_status: str | None = None, company: str | None = None,
+                       title: str | None = None) -> None:
+    """Insert a Gmail message row, or re-decide one that is still ignored or pending."""
     state = "pending" if suggested_status else "ignored"
     conn.execute(
-        """INSERT OR IGNORE INTO gmail_messages (gmail_id, job_id, sender, subject, received,
-               snippet, suggested_status, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (gmail_id, job_id, sender, subject, received, snippet, suggested_status, state))
+        """INSERT INTO gmail_messages (gmail_id, job_id, sender, subject, received, snippet,
+               suggested_status, state, company, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(gmail_id) DO UPDATE SET job_id = excluded.job_id, sender = excluded.sender,
+               subject = excluded.subject, received = excluded.received,
+               snippet = excluded.snippet, suggested_status = excluded.suggested_status,
+               state = excluded.state, company = excluded.company, title = excluded.title
+           WHERE gmail_messages.state IN ('ignored', 'pending')""",
+        (gmail_id, job_id, sender, subject, received, snippet, suggested_status, state,
+         company, title))
     conn.commit()
 
 
 def list_gmail_suggestions(conn: sqlite3.Connection) -> list[dict]:
-    """Pending suggestions that would still move their job forward, newest email first."""
-    from .gmail.classify import should_suggest
+    """Pending suggestions that would still move a job forward, newest email first.
+    Emails about a company the app does not know yet collapse into one 'add' suggestion
+    per company, at the furthest stage any of them reached."""
+    from .gmail.classify import should_suggest, stage_rank
 
     rows = conn.execute(
-        """SELECT g.rowid AS id, g.*, j.company, j.title, j.status AS current_status
-           FROM gmail_messages g JOIN jobs j ON j.id = g.job_id
+        """SELECT g.rowid AS id, g.gmail_id, g.job_id, g.sender, g.subject, g.received,
+                  g.snippet, g.suggested_status, COALESCE(j.company, g.company) AS company,
+                  COALESCE(j.title, g.title) AS title, j.status AS current_status
+           FROM gmail_messages g LEFT JOIN jobs j ON j.id = g.job_id
            WHERE g.state = 'pending' ORDER BY g.received DESC, g.rowid DESC""").fetchall()
-    return [dict(r) for r in rows if should_suggest(r["current_status"], r["suggested_status"])]
+    # One suggestion per job (or per new company): the furthest stage, newest email for ties.
+    # Rows arrive newest first, so the first row seen at a stage is the newest one.
+    best: dict = {}
+    for r in map(dict, rows):
+        if r["job_id"] is not None and not should_suggest(r["current_status"], r["suggested_status"]):
+            continue
+        key = r["job_id"] if r["job_id"] is not None else "new:" + r["company"].lower()
+        rank = 99 if r["suggested_status"] in ("rejected", "withdrawn") else stage_rank(
+            r["suggested_status"])
+        if key not in best or rank > best[key][0]:
+            best[key] = (rank, r)
+    out = [r for _, r in best.values()]
+    return sorted(out, key=lambda r: (r["received"] or "", r["id"]), reverse=True)
+
+
+def _slug(text: str) -> str:
+    return "-".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split()) or "x"
 
 
 def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, accept: bool) -> bool:
@@ -318,10 +364,24 @@ def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, ac
                        (suggestion_id,)).fetchone()
     if row is None:
         return False
+    job_id = row["job_id"]
+    if job_id is None:
+        same_company = "job_id IS NULL AND state = 'pending' AND lower(company) = lower(?)"
+        if not accept:
+            conn.execute(f"UPDATE gmail_messages SET state = 'dismissed' WHERE {same_company}",
+                         (row["company"],))
+            conn.commit()
+            return True
+        title = row["title"] or "(added from Gmail)"
+        job_id, _ = upsert_job(conn, Job(
+            company=row["company"], title=title, source="gmail",
+            url=f"gmail://{_slug(row['company'])}/{_slug(title)}"))
+        conn.execute(f"UPDATE gmail_messages SET job_id = ? WHERE {same_company}",
+                     (job_id, row["company"]))
     conn.execute("UPDATE gmail_messages SET state = ? WHERE rowid = ?",
                  ("accepted" if accept else "dismissed", suggestion_id))
     conn.commit()
     if accept:
-        set_job_status(conn, row["job_id"], row["suggested_status"],
+        set_job_status(conn, job_id, row["suggested_status"],
                        note=f"From Gmail: {row['subject']} ({row['received']})")
     return True

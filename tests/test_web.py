@@ -294,3 +294,13 @@ def test_gmail_sync_reports_counts(settings):
     app.dependency_overrides[webapp.get_gmail_sync] = lambda: lambda conn, s: SyncReport(7, 2)
     r = tc(app).post("/gmail/sync")
     assert "7 new emails" in r.text and "2 suggested" in r.text
+
+
+def test_pipeline_shows_new_company_suggestion(client, settings):
+    conn = db.connect(settings.db_path)
+    db.save_gmail_message(conn, "n1", sender="Robyn <r@hippocraticai.com>",
+                          subject="Interview with Hippocratic AI", received="2026-11-03",
+                          snippet="", suggested_status="interviewing", company="Hippocratic AI")
+    conn.close()
+    page = client.get("/pipeline").text
+    assert "Hippocratic AI" in page and "not tracked" in page and "/jobs/None" not in page

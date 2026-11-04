@@ -75,3 +75,62 @@ def test_overlapping_names_pick_longest_and_unrelated_pair_gives_up():
     jobs = JOBS + [{"id": 5, "company": "Scale", "title": "Engineer", "status": "new"}]
     assert match_job(jobs, "x@y.io", "Scale AI interview", "")["id"] == 4
     assert match_job(JOBS, "x@y.io", "Harvey and Exa event", "") is None
+
+
+from jobhunt.gmail.classify import extract_company, is_ats_sender
+
+
+@pytest.mark.parametrize("subject,body,stage", [
+    ("Reminder: Your Upcoming Interview with AfterQuery", "", "interviewing"),
+    ("Invitation: Interview with Hippocratic AI @ Mon Nov 9, 2026 11:15am", "", "interviewing"),
+    ("Getting ready for your Hippocratic AI interview", "", "interviewing"),
+    ("Great news: Ambitus wants to invite you to an interview", "", "interviewing"),
+    ("Following Up: Schedule your Ambitus interview", "", "interviewing"),
+    # subject wins over body boilerplate such as "thanks for your interest"
+    ("AfterQuery - Research Scientist – Frontier Evaluations - Next Steps!",
+     "Thanks for your interest in AfterQuery! We'd like to move you to the next step.", "screening"),
+    ("Hippocratic AI — Looking forward to our conversation", "", "screening"),
+    ("Your QuantCo Application", "Unfortunately we will not be moving forward.", "rejected"),
+    ("Your application for Citadel's Machine Learning Researcher - PhD Graduate", "", "applied"),
+    ("We got your speedrun application!", "", "applied"),
+])
+def test_classify_real_world_subjects(subject, body, stage):
+    assert classify(subject, body) == stage
+
+
+@pytest.mark.parametrize("sender,subject,company", [
+    ("Ellipsis Health Hiring Team <no-reply@ashbyhq.com>", "Thanks for applying to Ellipsis Health!", "Ellipsis Health"),
+    ("Robyn <robyn@hippocraticai.com>", "Invitation: Interview with Hippocratic AI @ Mon Nov 9", "Hippocratic AI"),
+    ("Robyn <robyn@hippocraticai.com>", "Getting ready for your Hippocratic AI interview", "Hippocratic AI"),
+    ("Rounds Team <interviews@getrounds.co>", "Great news: Ambitus wants to invite you to an interview", "Ambitus"),
+    ("Rounds Team <interviews@getrounds.co>", "Following Up: Schedule your Ambitus interview", "Ambitus"),
+    ("No-Reply <no-reply@citadel.com>", "Your application for Citadel's Machine Learning Researcher", "Citadel"),
+    ("Palantir Technologies <no-reply@hire.lever.co>", "Your application has been received!", "Palantir Technologies"),
+    ("no-reply@us.greenhouse-mail.io", "Thank you for applying to Anthropic", "Anthropic"),
+    ("Akshana <akshana@ambitus.ai>", "Invitation from an unknown sender: Ambitus - Interview Calendar @ Thu", "Ambitus"),
+    ("someone@example.com", "Quick question", None),
+    ("CapitalOneHRWorkday <capitalone@myworkday.com>", "Thank you for your interest", "CapitalOne"),
+])
+def test_extract_company(sender, subject, company):
+    assert extract_company(sender, subject) == company
+
+
+def test_is_ats_sender():
+    assert is_ats_sender("X Hiring Team <no-reply@ashbyhq.com>")
+    assert is_ats_sender("no-reply@us.greenhouse-mail.io")
+    assert is_ats_sender("Palantir <no-reply@hire.lever.co>")
+    assert not is_ats_sender("TLDR <dan@tldrnewsletter.com>")
+
+
+@pytest.mark.parametrize("sender,subject", [
+    ("x@gmail.com", "Re: Job description for your review - let me know your thoughts!"),
+    ("x@company.com", "Your recent job application for 152899 - Staff ML Engineer"),
+])
+def test_extract_company_rejects_phrases(sender, subject):
+    assert extract_company(sender, subject) is None
+
+
+def test_match_prefers_ready_job_over_new_one_at_same_company():
+    jobs = [{"id": 13, "company": "AfterQuery", "title": "Research Scientist", "status": "ready"},
+            {"id": 91, "company": "AfterQuery", "title": "Research Engineer", "status": "new"}]
+    assert match_job(jobs, "jarod@afterquery.com", "Interview with AfterQuery", "")["id"] == 13

@@ -25,6 +25,7 @@ class Message:
     date: str  # YYYY-MM-DD (UTC)
     snippet: str
     body: str
+    bulk: bool = False  # has List-Unsubscribe / List-Id: newsletter-style mail
 
 
 def _decode(data: str | None) -> str:
@@ -99,4 +100,8 @@ class GmailClient:
         ms = int(d.get("internalDate") or 0)
         date = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         return Message(id=mid, sender=headers.get("from", ""), subject=headers.get("subject", ""),
-                       date=date, snippet=d.get("snippet", ""), body=_body(payload))
+                       date=date, snippet=d.get("snippet", ""), body=_body(payload),
+                       bulk="list-unsubscribe" in headers or "list-id" in headers)
+
+    def profile_email(self) -> str:
+        return self._get(f"{API}/profile").get("emailAddress", "")
