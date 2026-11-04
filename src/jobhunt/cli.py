@@ -31,3 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def main_entry() -> None:
     sys.exit(main())
+
+from . import scan  # noqa: E402
+
+REGISTRARS.append(scan.register)
