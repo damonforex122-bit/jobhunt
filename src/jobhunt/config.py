@@ -15,9 +15,11 @@ class Settings(BaseModel):
     # Gmail (read-only). Both files live in data/, which git ignores.
     gmail_client_secret: Path = Path("data/gmail_client_secret.json")
     gmail_token: Path = Path("data/gmail_token.json")
+    master_resume_path: Path = Path("~/Documents/Resume/Georgia Liu - Master Resume.pdf").expanduser()
+    resume_output_dir: Path = Path("~/Documents/Resume").expanduser()
 
     @field_validator("proficiently_dir", "db_path", "watchlist_path", "gmail_client_secret",
-                     "gmail_token")
+                     "gmail_token", "master_resume_path", "resume_output_dir")
     @classmethod
     def _expand_home(cls, v: Path) -> Path:
         return Path(v).expanduser()

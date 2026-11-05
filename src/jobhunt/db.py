@@ -58,6 +58,11 @@ CREATE TABLE IF NOT EXISTS gmail_messages (
     company TEXT, title TEXT,  -- set when job_id is NULL: a company the app does not know yet
     state TEXT NOT NULL  -- ignored | pending | accepted | dismissed
 );
+CREATE TABLE IF NOT EXISTS master_cache (
+    sha256 TEXT PRIMARY KEY,
+    resume_json TEXT,
+    parsed_at TEXT
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -385,3 +390,17 @@ def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, ac
         set_job_status(conn, job_id, row["suggested_status"],
                        note=f"From Gmail: {row['subject']} ({row['received']})")
     return True
+
+
+# --- tailored resume: parsed master cache ----------------------------------
+
+def get_master_cache(conn: sqlite3.Connection, sha: str) -> str | None:
+    row = conn.execute("SELECT resume_json FROM master_cache WHERE sha256 = ?", (sha,)).fetchone()
+    return row[0] if row else None
+
+
+def save_master_cache(conn: sqlite3.Connection, sha: str, resume_json: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO master_cache (sha256, resume_json, parsed_at) VALUES (?, ?, ?)",
+        (sha, resume_json, _now()))
+    conn.commit()
