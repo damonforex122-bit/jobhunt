@@ -243,7 +243,7 @@ def upsert_job(conn: sqlite3.Connection, j: Job) -> tuple[int, bool]:
         return cur.lastrowid, True
 
     updates = {f: getattr(j, f) for f in _JOB_UPDATE_FIELDS if getattr(j, f) is not None}
-    if j.flags or j.source not in ("proficiently", "import"):  # a scan re-evaluates flags, so [] must clear stale ones
+    if j.flags or j.source != "proficiently":  # a scan re-evaluates flags, so [] must clear stale ones
         updates["flags"] = json.dumps(j.flags)
     if existing["status"] == "new":
         updates["status"] = j.status

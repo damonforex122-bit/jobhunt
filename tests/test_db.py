@@ -53,5 +53,5 @@ def test_scan_upsert_clears_stale_flags(conn):
 
 def test_import_upsert_keeps_flags(conn):
     jid, _ = db.upsert_job(conn, job(source="ashby", flags=["remote"]))
-    db.upsert_job(conn, job(source="import", flags=[]))
+    db.upsert_job(conn, job(source="proficiently", flags=[]))
     assert db.get_job(conn, jid)["flags"] == ["remote"]
