@@ -111,6 +111,16 @@ def _note(text: str, reason: str) -> str:
     return f'Kept your original wording for "{text[:60]}" ({reason})'
 
 
+def _role_lines(master: Resume) -> list[str]:
+    """Each role's own facts (title, org, dates, blurb), so the summary may name them."""
+    out = []
+    for e in master.experience:
+        line = f"{e.title}, {e.org}, {e.location}, {e.dates}"
+        out.append(f"{line}. {e.blurb}" if e.blurb else line)
+    out += [f"{ed.school}, {ed.detail}, {ed.dates}" for ed in master.education]
+    return out
+
+
 def assemble(
     draft: Draft,
     master: Resume,
@@ -129,7 +139,8 @@ def assemble(
     summary_pos = None
     if "summary" not in problems:
         summary_pos = len(pairs)
-        pairs.append((draft.summary, [master.summary, *(b.text for b in master_bullets.values())]))
+        pairs.append((draft.summary, [master.summary, *_role_lines(master),
+                                      *(b.text for b in master_bullets.values())]))
     summary_judge_reason: str | None = None
     if pairs:
         verdicts = judge_fn(pairs)

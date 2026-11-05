@@ -118,7 +118,11 @@ def test_summary_goes_to_judge_and_rejection_falls_back():
     resume, _, fallbacks = assemble(d, MASTER, judge)
     assert len(seen) == 1
     text, sources = seen[0][-1]
-    assert text == d.summary and sources[0] == MASTER.summary and len(sources) == 1 + len(MASTER.all_bullets())
+    roles = len(MASTER.experience) + len(MASTER.education)
+    assert text == d.summary and sources[0] == MASTER.summary
+    assert len(sources) == 1 + roles + len(MASTER.all_bullets())
+    e = MASTER.experience[0]
+    assert any(e.title in src and e.org in src for src in sources)  # role titles back the summary
     assert resume.summary == MASTER.summary
     assert len(fallbacks) == 1 and "overclaims" in fallbacks[0]
 
