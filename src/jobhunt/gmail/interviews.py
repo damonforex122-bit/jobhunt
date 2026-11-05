@@ -10,6 +10,7 @@ from ..config import Settings
 from .connect import close_client, make_gmail_client
 from .classify import extract_company, match_job
 from .client import GmailClient, GmailError
+from .imap_client import ImapGmailClient
 from .invites import Invite, local_tz, parse_ics, parse_subject
 
 INVITE_QUERY = 'newer_than:{days}d (filename:ics OR subject:(invitation OR invite))'
@@ -32,7 +33,7 @@ def _invites(msg, now: datetime, tz) -> list[Invite]:
     return found
 
 
-def run_interview_sync(conn, settings: Settings, client: GmailClient | None = None, days: int = 30,
+def run_interview_sync(conn, settings: Settings, client: GmailClient | ImapGmailClient | None = None, days: int = 30,
                        *, tz=None, now: datetime | None = None) -> int:
     if client is None:
         client = make_gmail_client(settings)

@@ -35,17 +35,22 @@ def raw_mail(subject="Next steps with Acme", sender="Rita <rita@acme.com>", plai
 class FakeImap:
     """messages: {uid: (x_gm_msgid_decimal, raw_bytes)}"""
 
-    def __init__(self, messages, login_error=False):
+    def __init__(self, messages, login_error=False, login_raises=None, select_raises=None):
         self.messages, self.login_error = messages, login_error
+        self.login_raises, self.select_raises = login_raises, select_raises
         self.calls, self.selected, self.logged_out, self.logged_in = [], None, False, None
 
     def login(self, user, password):
+        if self.login_raises:
+            raise self.login_raises
         if self.login_error:
             raise imaplib.IMAP4.error(f"[AUTHENTICATIONFAILED] {password} invalid")
         self.logged_in = (user, password)
         return "OK", [b"ok"]
 
     def select(self, mailbox, readonly=False):
+        if self.select_raises:
+            raise self.select_raises
         self.selected = (mailbox, readonly)
         return "OK", [b"1"]
 
@@ -130,7 +135,7 @@ def test_bad_login_message_has_no_password_and_logs_out():
     with pytest.raises(GmailError) as e:
         client_for(fake).list_ids("x")
     assert "rejected the app password" in str(e.value) and PASSWORD not in str(e.value)
-    assert PASSWORD not in repr(e.value.__cause__) and fake.logged_out
+    assert e.value.__suppress_context__ and fake.logged_out
 
 
 def test_socket_errors_become_gmail_error():
@@ -203,3 +208,48 @@ def test_test_connection_reports_count(tmp_path, monkeypatch):
     patch_imap(monkeypatch, FakeImap({1: (1, raw_mail()), 2: (2, raw_mail())}))
     assert connect.test_connection(imap_settings(tmp_path)) == (
         "Connected as me@gmail.com — found 2 job emails in the last 30 days")
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    ({"login_raises": TimeoutError("t")}, "Couldn't reach Gmail \\(TimeoutError\\)"),
+    ({"select_raises": OSError("x")}, "Couldn't reach Gmail \\(OSError\\)"),
+    ({"login_raises": imaplib.IMAP4.abort("dropped")}, "Lost the connection to Gmail"),
+])
+def test_login_and_select_failures_are_gmail_errors(kwargs, match):
+    fake = FakeImap({}, **kwargs)
+    with pytest.raises(GmailError, match=match) as e:
+        client_for(fake).list_ids("x")
+    assert "rejected" not in str(e.value) and fake.logged_out
+
+
+def test_abort_mid_command_closes_connection():
+    fake = FakeImap({1: (1, raw_mail())})
+    c = client_for(fake)
+    c.list_ids("x")
+
+    def abort(*a):
+        raise imaplib.IMAP4.abort("gone")
+
+    fake.uid = abort
+    with pytest.raises(GmailError, match="Lost the connection"):
+        c.list_ids("x")
+    assert fake.logged_out and c._imap is None
+
+
+@pytest.mark.parametrize("query", ["a\nb", "caf\u00e9", "a\x00b"])
+def test_query_with_control_or_non_ascii_chars_is_rejected(query):
+    with pytest.raises(GmailError, match="can't be searched"):
+        client_for(FakeImap({})).list_ids(query)
+
+
+def test_cli_not_connected_message(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from jobhunt.gmail import sync
+
+    monkeypatch.chdir(tmp_path)
+    p = argparse.ArgumentParser()
+    sync.register(p.add_subparsers())
+    args = p.parse_args(["gmail-sync"])
+    assert args.handler(args) == 1
+    assert "Connect Gmail in the app (Setup → Gmail), or run `jobhunt gmail-auth`" in capsys.readouterr().err

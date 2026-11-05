@@ -22,6 +22,8 @@ _BATCH = 500
 
 
 def _quote(value: str) -> str:
+    if not value.isascii() or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise GmailError("That Gmail search can't be searched over IMAP (non-ASCII or control characters)")
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -62,6 +64,13 @@ class ImapGmailClient:
             except Exception:  # noqa: BLE001 - closing must never raise
                 pass
 
+    @staticmethod
+    def _drop(imap) -> None:
+        try:
+            imap.logout()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _connect(self):
         if self._imap is not None:
             return self._imap
@@ -72,16 +81,21 @@ class ImapGmailClient:
         try:
             try:
                 imap.login(self.address, self._password)
+            except imaplib.IMAP4.abort:
+                raise GmailError("Lost the connection to Gmail — try again.") from None
             except imaplib.IMAP4.error:
                 raise GmailError(BAD_PASSWORD) from None
             typ, _ = imap.select(MAILBOX, readonly=True)
             if typ != "OK":
                 raise GmailError("Couldn't open the All Mail folder — is IMAP turned on in Gmail settings?")
+        except imaplib.IMAP4.abort:
+            self._drop(imap)
+            raise GmailError("Lost the connection to Gmail — try again.") from None
+        except OSError as exc:
+            self._drop(imap)
+            raise GmailError(f"Couldn't reach Gmail ({type(exc).__name__})") from None
         except BaseException:
-            try:
-                imap.logout()
-            except Exception:  # noqa: BLE001
-                pass
+            self._drop(imap)
             raise
         self._imap = imap
         return imap
@@ -90,6 +104,9 @@ class ImapGmailClient:
         imap = self._connect()
         try:
             typ, data = imap.uid(*args)
+        except imaplib.IMAP4.abort:
+            self.close()
+            raise GmailError("Lost the connection to Gmail — try again.") from None
         except imaplib.IMAP4.error:
             raise GmailError("Gmail IMAP command failed") from None
         except OSError as exc:

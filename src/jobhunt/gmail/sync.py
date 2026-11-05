@@ -12,6 +12,7 @@ from email.utils import parseaddr
 
 from .classify import classify, extract_company, is_ats_sender, match_job, should_suggest
 from .client import GmailClient, GmailError
+from .imap_client import ImapGmailClient
 
 KEYWORDS = ('interview OR application OR applying OR "next steps" OR "next step" OR onsite OR '
             '"offer letter" OR "extend an offer" OR unfortunately OR recruiter OR "phone screen" OR '
@@ -28,7 +29,7 @@ class SyncReport:
     suggested: int = 0
 
 
-def run_sync(conn, settings: Settings, client: GmailClient | None = None, days: int = 30,
+def run_sync(conn, settings: Settings, client: GmailClient | ImapGmailClient | None = None, days: int = 30,
              limit: int = 200, recheck: bool = False) -> SyncReport:
     """`recheck` re-reads every email not yet accepted or dismissed (after the rules change)."""
     if client is None:
@@ -104,8 +105,9 @@ def register(sub) -> None:
                 note = f"{run_interview_sync(conn, settings, days=args.days)} interviews updated. "
             except Exception as e:  # noqa: BLE001 - suggestions already succeeded
                 note = f"Couldn't read interviews: {short_error(e)}. "
-        except GmailNotConnected as e:
-            print(e, file=sys.stderr)
+        except GmailNotConnected:
+            print("Connect Gmail in the app (Setup → Gmail), or run `jobhunt gmail-auth` "
+                  "for Google OAuth.", file=sys.stderr)
             return 1
         except GmailError as e:
             print(f"{e}\nEmails checked before the error are saved; run gmail-sync again to continue.",
