@@ -5,6 +5,7 @@
 <div class="flex items-center gap-2">
 <form method="post" action="/gmail/sync"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>
 {% if not gmail_connected %}<span class="text-sm opacity-60">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
+{% if upcoming_interviews %}<a class="link link-primary text-sm" href="/interviews">{{ upcoming_interviews }} upcoming interviews</a>{% endif %}
 </div>
 {% if suggestions %}<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Email</th><th>Job</th><th>Move</th><th></th></tr></thead><tbody>
 {% for s in suggestions %}<tr><td><span class="text-sm opacity-60">{{ s.received }} &middot; {{ s.sender }}</span><br>{{ s.subject }}<br><span class="text-sm opacity-60">{{ s.snippet }}</span></td>

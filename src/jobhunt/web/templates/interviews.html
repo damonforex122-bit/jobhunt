@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% macro rows(items) %}{% for i in items %}<tr class="{{ 'opacity-50' if i.closed }}">
+<td class="whitespace-nowrap">{{ i.when }}</td>
+<td>{{ i.company or '' }}{% if i.job_id and i.job_title %}<br><a class="link link-primary" href="/jobs/{{ i.job_id }}">{{ i.job_title }}</a>{% endif %}</td>
+<td>{{ i.summary or '' }}</td>
+<td>{% if i.link|safe_url %}<a class="btn btn-primary btn-sm" href="{{ i.link|safe_url }}" target="_blank" rel="noopener noreferrer">Join</a>{% elif i.location %}{{ i.location }}{% endif %}</td></tr>{% endfor %}{% endmacro %}
+{% block body %}
+<h1 class="text-2xl font-bold">Interviews</h1>
+<div class="flex items-center gap-2">
+<form method="post" action="/gmail/sync"><input type="hidden" name="next" value="/interviews"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>
+{% if not gmail_connected %}<span class="text-sm opacity-60">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
+</div>
+{% if upcoming %}<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>When</th><th>Job</th><th>Invite</th><th></th></tr></thead><tbody>
+{{ rows(upcoming) }}
+</tbody></table></div>{% else %}<p class="text-sm opacity-60">No upcoming interviews found in Gmail invites.</p>{% endif %}
+{% if past %}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title font-semibold">Past interviews ({{ past|length }})</summary>
+<div class="collapse-content overflow-x-auto"><table class="table"><tbody>
+{{ rows(past) }}
+</tbody></table></div></details>{% endif %}
+{% endblock %}

@@ -22,6 +22,7 @@ from ..fit import grade_job
 from ..gmail import interviews as gmail_interviews
 from ..gmail import sync as gmail_sync
 from ..gmail.auth import GmailNotConnected
+from ..gmail.invites import local_tz
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..tailor import tailor_job
@@ -43,6 +44,19 @@ def safe_url(value: str | None) -> str:
 
 
 TEMPLATES.env.filters["safe_url"] = safe_url
+
+
+def _local_when(iso: str | None) -> str:
+    """'Mon Nov 9 · 11:15 AM' in the machine's local time; '' when unparseable."""
+    try:
+        dt = datetime.fromisoformat(iso or "")
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    tz = local_tz()
+    dt = dt.astimezone(tz) if tz is not None else dt.astimezone()
+    return f"{dt:%a} {dt:%b} {dt.day} · {dt.hour % 12 or 12}:{dt:%M} {'AM' if dt.hour < 12 else 'PM'}"
 
 
 # --- overridable action dependencies ---------------------------------------
@@ -73,6 +87,10 @@ def get_gmail_sync() -> Callable:
 
 def get_interview_sync() -> Callable:
     return gmail_interviews.run_interview_sync
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _banner(s: Settings) -> list[str]:
@@ -218,11 +236,27 @@ def create_app(settings: Settings) -> FastAPI:
         return render(request, "pipeline.html", board=db.pipeline_board(conn),
                       pipeline=PIPELINE, closed=CLOSED,
                       suggestions=db.list_gmail_suggestions(conn),
+                      gmail_connected=settings.gmail_token.exists(),
+                      upcoming_interviews=len(db.list_interviews(conn, now=_now_iso())))
+
+    @app.get("/interviews", response_class=HTMLResponse)
+    def interviews_page(request: Request, conn: Conn):
+        now = _now_iso()
+        rows = db.list_interviews(conn, upcoming_only=False, now=now)
+        for r in rows:
+            r["when"] = _local_when(r["start"])
+            r["closed"] = r.get("job_status") in ("rejected", "withdrawn")
+        upcoming = [r for r in rows if (r["start"] or "") >= now]
+        past = [r for r in rows if (r["start"] or "") < now][::-1]
+        return render(request, "interviews.html", upcoming=upcoming, past=past,
                       gmail_connected=settings.gmail_token.exists())
 
     @app.post("/gmail/sync")
     def post_gmail_sync(conn: Conn, syncer: Annotated[Callable, Depends(get_gmail_sync)],
-                        interview_syncer: Annotated[Callable, Depends(get_interview_sync)]):
+                        interview_syncer: Annotated[Callable, Depends(get_interview_sync)],
+                        next: Annotated[str, Form()] = ""):
+        dest = next if (next.startswith("/") and not next.startswith("//")
+                        and "\\" not in next and "?" not in next) else "/pipeline"
         try:
             r = syncer(conn, settings)
             msg = f"Checked {r.scanned} new emails, {r.suggested} suggested moves"
@@ -234,7 +268,7 @@ def create_app(settings: Settings) -> FastAPI:
             msg = str(e)
         except Exception as e:  # network/Google errors must not 500 the page
             msg = f"Gmail sync failed: {short_error(e)}"
-        return RedirectResponse(f"/pipeline?msg={quote(msg)}", status_code=303)
+        return RedirectResponse(f"{dest}?msg={quote(msg)}", status_code=303)
 
     @app.post("/gmail/suggestions/{suggestion_id}/{action}")
     def post_suggestion(suggestion_id: int, action: str, conn: Conn):
