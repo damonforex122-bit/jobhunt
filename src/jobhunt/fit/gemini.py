@@ -24,7 +24,8 @@ class FitResponse(BaseModel):
     gaps: str
 
 
-def build_prompt(resume: str, posting: str, company: str, title: str) -> str:
+def build_prompt(resume: str, posting: str, company: str, title: str, notes: str = "") -> str:
+    notes_block = f"Notes from the candidate:\n{notes.strip()}\n\n" if notes.strip() else ""
     return f"""Act as a Fortune 500 technical recruiter and ATS algorithm specialist.
 Compare my resume/profile to the job description below and respond in the requested JSON schema.
 
@@ -42,11 +43,7 @@ Rules for rewritten_bullets:
 Also give fit_score, an overall fit from 1 to 10. fit_score 8+ means apply now; 7 or below means low priority.
 Briefly explain in reasons (why it fits) and gaps (what is weak or missing).
 
-Profile notes you must respect:
-- Say "building", not "built", when describing my benchmark; it is still in progress.
-- Never state the funding amount.
-
-Company: {company}
+{notes_block}Company: {company}
 Role: {title}
 
 --- JOB DESCRIPTION ---
@@ -97,7 +94,7 @@ def _short_error(exc: Exception, settings: Settings) -> str:
     return msg[:200]
 
 
-def grade(job: dict, resume: str, settings: Settings, client=None) -> Fit:
+def grade(job: dict, resume: str, settings: Settings, client=None, notes: str = "") -> Fit:
     posting = (job.get("description") or "").strip()
     base = {"job_id": job["id"], "graded_at": _now(), "model": settings.gemini_model}
     if not posting:
@@ -115,7 +112,7 @@ def grade(job: dict, resume: str, settings: Settings, client=None) -> Fit:
         except Exception as exc:
             return Fit(error=_short_error(exc, settings), **base)
 
-    prompt = build_prompt(resume, posting, job.get("company", ""), job.get("title", ""))
+    prompt = build_prompt(resume, posting, job.get("company", ""), job.get("title", ""), notes)
     try:
         response = client.models.generate_content(
             model=settings.gemini_model,

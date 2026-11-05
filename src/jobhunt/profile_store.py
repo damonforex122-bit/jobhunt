@@ -55,7 +55,21 @@ def save_preferences(conn: sqlite3.Connection, prefs: Preferences) -> None:
 
 
 def effective_preferences(conn: sqlite3.Connection, settings: Settings) -> Preferences:
-    return get_preferences(conn) or load_preferences(settings.proficiently_dir)
+    saved = get_preferences(conn)
+    if saved is not None:
+        return saved
+    if settings.proficiently_dir is not None and Path(settings.proficiently_dir).is_dir():
+        return load_preferences(settings.proficiently_dir)
+    return Preferences(locations=[], salary_floor=0, search_terms=[], excluded_terms=[],
+                       target_roles=[])
+
+
+def get_ai_notes(conn: sqlite3.Connection) -> str:
+    return get(conn, "ai_notes") or ""
+
+
+def save_ai_notes(conn: sqlite3.Connection, text: str) -> None:
+    put(conn, "ai_notes", text.strip())
 
 
 def get_master(conn: sqlite3.Connection) -> MasterInfo | None:
@@ -67,6 +81,11 @@ def save_master(conn: sqlite3.Connection, info: MasterInfo) -> None:
     put(conn, "master", info.model_dump())
 
 
-def effective_master_path(conn: sqlite3.Connection, settings: Settings) -> Path:
+def effective_master_path(conn: sqlite3.Connection, settings: Settings) -> Path | None:
     info = get_master(conn)
     return Path(info.path) if info else settings.master_resume_path
+
+
+def effective_output_dir(conn: sqlite3.Connection, settings: Settings) -> Path:
+    saved = get(conn, "resume_output_dir")
+    return Path(saved).expanduser() if saved else settings.resume_output_dir

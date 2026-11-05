@@ -121,3 +121,7 @@ def _register_add(sub) -> None:
 
 
 REGISTRARS.append(_register_add)
+
+from . import migrate  # noqa: E402
+
+REGISTRARS.append(migrate.register)

@@ -78,7 +78,7 @@ def test_revise_passes_previous_draft_and_all_instructions_in_order(conn, settin
     revise_job(conn, j, settings, "mention mentoring", client=client)
     p = prompt_of(client)
     assert "--- CURRENT VERSION ---" in p and "Lifted retention by 4 points" in p
-    assert "--- HER CHANGE REQUESTS (oldest first) ---" in p
+    assert "--- THE CANDIDATE'S CHANGE REQUESTS (oldest first) ---" in p
     assert p.index("make it shorter") < p.index("lead with forecasting") < p.index("mention mentoring")
     assert "Summary rewritten" not in p.split("CHANGE REQUESTS")[1]
     assert "never add facts the sources don't state" in p
@@ -169,7 +169,7 @@ class EchoGemini(FakeGemini):
 
     def generate_content(self, **kw):
         if kw["config"]["response_schema"] is Draft and "--- CURRENT VERSION ---" in kw["contents"]:
-            block = kw["contents"].split("--- CURRENT VERSION ---")[1].split("--- HER CHANGE REQUESTS")[0]
+            block = kw["contents"].split("--- CURRENT VERSION ---")[1].split("--- THE CANDIDATE'S CHANGE REQUESTS")[0]
             self.responses[Draft] = Draft.model_validate_json(block.strip())
         return super().generate_content(**kw)
 

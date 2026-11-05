@@ -4,8 +4,7 @@ from pathlib import Path
 from .. import db
 from ..config import Settings, short_error
 from ..models import Fit
-from ..profile import load_resume_text
-from ..profile_store import get_master
+from ..profile_store import effective_master_path, get_ai_notes
 from ..tailor.master import MasterError, load_master
 from .gemini import _now, grade
 
@@ -14,17 +13,18 @@ def grade_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=
     job = db.get_job(conn, job_id)
     if job is None:
         raise ValueError(f"No job with id {job_id}")
-    info = get_master(conn)
-    if info:
-        try:
-            resume = load_master(conn, Path(info.path)).full_text()
-        except MasterError as exc:  # never grade a different resume than the one uploaded
-            fit = Fit(job_id=job_id, keyword_score=0, graded_at=_now(), model=settings.gemini_model,
-                      error=f"Couldn't read your uploaded master resume: {short_error(exc)}")
-            return _record(conn, job, fit)
-    else:
-        resume = load_resume_text(settings.proficiently_dir)
-    return _record(conn, job, grade(job, resume, settings, client=client))
+    path = effective_master_path(conn, settings)
+    if path is None:
+        fit = Fit(job_id=job_id, keyword_score=0, graded_at=_now(), model=settings.gemini_model,
+                  error="Upload your resume on the Setup page first.")
+        return _record(conn, job, fit)
+    try:
+        resume = load_master(conn, Path(path)).full_text()
+    except MasterError as exc:  # never grade a different resume than the one chosen
+        fit = Fit(job_id=job_id, keyword_score=0, graded_at=_now(), model=settings.gemini_model,
+                  error=f"Couldn't read your uploaded master resume: {short_error(exc)}")
+        return _record(conn, job, fit)
+    return _record(conn, job, grade(job, resume, settings, client=client, notes=get_ai_notes(conn)))
 
 
 def _record(conn: sqlite3.Connection, job: dict, fit: Fit) -> Fit:

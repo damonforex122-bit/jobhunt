@@ -170,7 +170,8 @@ def supported_requirements(resume: Resume, reqs: list[Requirement], matches: Mat
 
 
 def write(client, settings: Settings, resume: Resume, reqs: Requirements, matches: Matches,
-          previous: Draft | None = None, instructions: list[str] | None = None) -> Draft:
+          previous: Draft | None = None, instructions: list[str] | None = None,
+          notes: str = "") -> Draft:
     evidence = _evidence(resume, matches)
     sup, gap_reqs = supported_requirements(resume, reqs.requirements, matches)
     supported = [{**r.model_dump(), "evidence_ids": evidence[r.id]} for r in sup]
@@ -185,16 +186,17 @@ def write(client, settings: Settings, resume: Resume, reqs: Requirements, matche
 --- CURRENT VERSION ---
 {current}
 
---- HER CHANGE REQUESTS (oldest first) ---
+--- THE CANDIDATE'S CHANGE REQUESTS (oldest first) ---
 {lines}
 
-Apply her change requests only where the master supports them; never add facts the sources don't state.
+Apply the candidate's change requests only where the master supports them; never add facts the sources don't state.
 """
-    prompt = f"""You tailor a candidate's resume to a job posting by selecting and rewording her real master-resume material.
+    notes_block = f"\nNotes from the candidate (respect these):\n{notes.strip()}\n" if notes.strip() else ""
+    prompt = f"""You tailor a candidate's resume to a job posting by selecting and rewording their real master-resume material.
 
 Rules:
 - Use only facts in the cited source bullets. Every bullet you write must cite at least one source_id from the same entry (the ids of master bullets in that entry).
-- Write each bullet as one or two short, plain sentences that lead with what she did and state the result, e.g. "Built a search index for support tickets. Lookup time dropped from 2 minutes to 5 seconds." Show impact (the X, Y and Z of the work) in natural wording; never use the template phrases "as measured by" or "by doing".
+- Write each bullet as one or two short, plain sentences that lead with what the candidate did and state the result, e.g. "Built a search index for support tickets. Lookup time dropped from 2 minutes to 5 seconds." Show impact (the X, Y and Z of the work) in natural wording; never use the template phrases "as measured by" or "by doing".
 - no new numbers, metrics, tools, domains, employers, dates or outcomes beyond what the cited sources state. Keep every number you use exactly as in the source.
 - use the posting's wording only where the source supports it. Never add a skill or claim the sources do not show.
 - Fewer honest bullets are better than stretched ones. Drop weak bullets rather than padding.
@@ -204,6 +206,7 @@ Rules:
 - Do not write blurbs; they are copied from the master separately.
 - ranking: the indexes of your bullets, best first, over the flattened list of draft bullets in entry order (entries as listed in your entries, then each entry's bullets in order, counting from 0).
 
+{notes_block}
 --- MASTER RESUME (ids and texts) ---
 {_master_json(resume)}
 

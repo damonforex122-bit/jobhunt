@@ -1,4 +1,6 @@
 import pytest
+from master_layout import render_master_layout
+from tailor_fakes import sample_resume
 
 from jobhunt import db
 from jobhunt.config import Settings
@@ -8,14 +10,13 @@ from jobhunt.models import Fit, Job
 
 @pytest.fixture
 def setup(conn, tmp_path):
-    pdir = tmp_path / "prof"
-    pdir.mkdir()
-    (pdir / "resume.md").write_text("python evals")
+    master = tmp_path / "master.pdf"
+    render_master_layout(sample_resume(), master)
     jid, _ = db.upsert_job(conn, Job(company="A", title="T", url="https://x.test/1",
                                      source="import", description="Need evals and rubrics"))
     db.save_fit(conn, Fit(job_id=jid, keyword_score=0, llm_score=8, reasons="imported",
                           model="proficiently-import", graded_at="2026-01-01"))
-    return jid, Settings(proficiently_dir=pdir, db_path=tmp_path / "t.db")
+    return jid, Settings(master_resume_path=master, db_path=tmp_path / "t.db")
 
 
 class Boom:

@@ -93,8 +93,7 @@ def test_load_watchlist_missing_file_returns_empty(tmp_path):
 
 def test_load_watchlist_seed():
     cos = ats.load_watchlist(Path(__file__).parent.parent / "config" / "watchlist.yaml")
-    assert [c.name for c in cos] == ["Anthropic", "Harvey", "Mercor"]
-    assert cos[0].ats == "greenhouse" and cos[0].domain == "anthropic.com"
+    assert cos == []  # shipped empty; friends add their own companies
 
 
 @respx.mock

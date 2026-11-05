@@ -180,6 +180,9 @@ def register(sub) -> None:
 
         settings = load_settings()
         directory = Path(args.dir).expanduser() if args.dir else settings.proficiently_dir
+        if directory is None:
+            print("No Proficiently folder set (PROFICIENTLY_DIR).")
+            return 1
         settings.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = connect(settings.db_path)
         try:

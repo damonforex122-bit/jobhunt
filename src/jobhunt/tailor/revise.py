@@ -1,4 +1,4 @@
-"""Chat revisions: regenerate the tailored resume from her change requests, under the same checks."""
+"""Chat revisions: regenerate the tailored resume from the candidate's change requests, under the same checks."""
 
 import re
 import sqlite3
@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from .. import db
 from ..config import Settings
 from ..fit.gemini import _short_error
-from ..profile_store import effective_master_path
+from ..profile_store import effective_master_path, get_ai_notes
 from . import TailorResult, _fail, _finish, agents, resume_from_draft, tailor_job
 from .agents import AgentError, Draft, Matches, Requirements
 from .check import _CAP_TERM, _SENTENCE_SPLIT
@@ -41,7 +41,7 @@ def summarize_changes(old: Resume | None, new: Resume) -> list[str]:
     return changes or ["No changes"]
 
 
-# Sentence-initial words that are phrasing, not a named term she wants added.
+# Sentence-initial words that are phrasing, not a named term the candidate wants added.
 _NOT_TERMS = {w.casefold() for w in (
     "Add Make Remove Drop Lead Shorten Mention Use Put Move Keep Rewrite Change Say Show Highlight "
     "Emphasize Focus Cut Replace I Please Can Could Would Also And But Now Then Maybe Thanks The A An "
@@ -95,7 +95,8 @@ def revise_job(conn: sqlite3.Connection, job_id: int, settings: Settings, instru
         previous = Draft.model_validate_json(rec["draft_json"]) if rec.get("draft_json") else None
         step("Rewriting with your changes…")
         draft = agents.write(client, settings, master, reqs, matches,
-                             previous=previous, instructions=instructions)
+                             previous=previous, instructions=instructions,
+                             notes=get_ai_notes(conn))
         result, resume = _finish(conn, job_id, job, settings, master, master_sha, reqs, matches,
                                  draft, client, step)
     except Exception as exc:  # same net as tailor_job: never crash the caller (a web request)

@@ -4,12 +4,29 @@
 <div class="card bg-base-200 shadow-sm"><div class="card-body">
 <h2 class="card-title">Master resume</h2>
 {% if master %}<p>Active: <strong>{{ master.name }}</strong> <span class="text-sm opacity-70">uploaded {{ master.uploaded_at }}</span></p>
-{% else %}<p>Using the default file: <code>{{ master_path }}</code></p>{% endif %}
+{% elif master_path %}<p>Using the file: <code>{{ master_path }}</code></p>
+{% else %}<p>No master resume yet. Upload one below.</p>{% endif %}
 <form method="post" action="/profile/master" enctype="multipart/form-data" class="flex flex-wrap gap-2 items-center">
 <input type="file" name="file" accept="application/pdf,.pdf" class="file-input file-input-bordered" required>
 <button class="btn btn-primary">Upload</button>
 </form>
 <p class="text-sm opacity-70">PDF in the master layout, up to 10 MB. It is checked before it replaces the current one.</p>
+</div></div>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">Resume output folder</h2>
+<form method="post" action="/profile/output" class="space-y-2">
+<label class="form-control"><span class="label-text">Folder for tailored resumes</span><input class="input input-bordered w-full" name="output_dir" value="{{ output_dir }}"></label>
+<button class="btn btn-primary">Save folder</button>
+</form>
+</div></div>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">Notes for the AI</h2>
+<form method="post" action="/profile/notes" class="space-y-2">
+<label class="form-control"><span class="label-text">Anything the AI should respect when grading and tailoring (one per line)</span><textarea class="textarea textarea-bordered w-full" name="notes" rows="4">{{ ai_notes }}</textarea></label>
+<button class="btn btn-primary">Save notes</button>
+</form>
 </div></div>
 
 <div class="card bg-base-200 shadow-sm"><div class="card-body">

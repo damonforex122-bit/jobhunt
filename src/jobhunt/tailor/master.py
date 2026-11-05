@@ -367,8 +367,10 @@ def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
     return load_master_with_sha(conn, path)[0]
 
 
-def load_master_with_sha(conn: sqlite3.Connection, path: Path) -> tuple[Resume, str]:
+def load_master_with_sha(conn: sqlite3.Connection, path: Path | None) -> tuple[Resume, str]:
     """Like `load_master`, plus the file hash the cache was keyed on."""
+    if path is None:
+        raise MasterError("Upload your resume on the Setup page first.")
     path = Path(path)
     if not path.is_file():
         raise MasterError(f"Master resume not found: {path}")

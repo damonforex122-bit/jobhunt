@@ -9,13 +9,17 @@ from pathlib import Path
 
 _BAD_CHARS = re.compile(r'[/\\:*?"<>|]')
 _CORP_SUFFIX = re.compile(r"(,\s*Inc\.?|\s+Inc\.?|,\s*LLC)\s*$", re.IGNORECASE)
-BASE_NAME = "Georgia Liu - Resume"
 
 
 def _clean(text: str) -> str:
     text = _BAD_CHARS.sub("", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" .\t")
+
+
+def resume_base_name(name: str | None) -> str:
+    clean = _clean(name or "")
+    return f"{clean} - Resume" if clean else "Resume"
 
 
 def company_folder(root: Path, company: str) -> Path:
@@ -48,17 +52,17 @@ def reusable_owned(owned: Path | None, recorded_sha: str | None, other_paths: se
     return owned
 
 
-def choose_path(folder: Path, title: str, owned: Path | None) -> Path:
+def choose_path(folder: Path, title: str, owned: Path | None, base_name: str) -> Path:
     if owned is not None:
         return Path(owned)
-    plain = folder / f"{BASE_NAME}.pdf"
+    plain = folder / f"{base_name}.pdf"
     if not plain.exists():
         return plain
     clean_title = _clean(title)[:80] or "Role"
-    named = folder / f"{BASE_NAME} ({clean_title}).pdf"
+    named = folder / f"{base_name} ({clean_title}).pdf"
     n = 2
     while named.exists():
-        named = folder / f"{BASE_NAME} ({clean_title}) {n}.pdf"
+        named = folder / f"{base_name} ({clean_title}) {n}.pdf"
         n += 1
     return named
 

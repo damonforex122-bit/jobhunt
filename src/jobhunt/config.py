@@ -5,7 +5,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 
 class Settings(BaseModel):
-    proficiently_dir: Path = Path("~/Documents/Resume/.proficiently").expanduser()
+    proficiently_dir: Path | None = None
     db_path: Path = Path("data/jobhunt.db")
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
@@ -20,15 +20,15 @@ class Settings(BaseModel):
     # Gmail (read-only). Both files live in data/, which git ignores.
     gmail_client_secret: Path = Path("data/gmail_client_secret.json")
     gmail_token: Path = Path("data/gmail_token.json")
-    master_resume_path: Path = Path("~/Documents/Resume/Georgia Liu - Master Resume.pdf").expanduser()
-    resume_output_dir: Path = Path("~/Documents/Resume").expanduser()
+    master_resume_path: Path | None = None
+    resume_output_dir: Path = Path("~/Documents/jobhunt/Resumes").expanduser()
     env_path: Path = Path(".env")
 
     @field_validator("proficiently_dir", "db_path", "watchlist_path", "gmail_client_secret",
                      "gmail_token", "master_resume_path", "resume_output_dir", "env_path")
     @classmethod
-    def _expand_home(cls, v: Path) -> Path:
-        return Path(v).expanduser()
+    def _expand_home(cls, v: Path | None) -> Path | None:
+        return None if v is None else Path(v).expanduser()
 
 
 KEY_FIELDS = ("gemini_api_key", "anthropic_api_key", "openrouter_api_key", "apollo_api_key",

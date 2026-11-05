@@ -46,7 +46,7 @@ def _grade_setup(conn, tmp_path, monkeypatch):
                                      source="import", description="Need evals"))
     seen = {}
 
-    def fake_grade(job, resume, settings, client=None):
+    def fake_grade(job, resume, settings, client=None, notes=""):
         seen["resume"] = resume
         return Fit(job_id=job["id"], keyword_score=0, llm_score=5, reasons="r", model="m",
                    graded_at="2026-01-01")
@@ -66,10 +66,13 @@ def test_grading_uses_uploaded_master_text(conn, tmp_path, monkeypatch):
     assert seen["resume"] == master.full_text()
 
 
-def test_grading_without_upload_reads_proficiently(conn, tmp_path, monkeypatch):
+def test_grading_uses_configured_master_path(conn, tmp_path, monkeypatch):
     jid, s, seen = _grade_setup(conn, tmp_path, monkeypatch)
-    grade_job(conn, jid, s)
-    assert "proficiently resume text" in seen["resume"]
+    master = sample_resume()
+    pdf = tmp_path / "env.pdf"
+    render_master_layout(master, pdf)
+    grade_job(conn, jid, s.model_copy(update={"master_resume_path": pdf}))
+    assert seen["resume"] == master.full_text()
 
 
 def test_apply_profile_links_replaces_appends_and_copies():

@@ -11,13 +11,15 @@ from pydantic import BaseModel
 from .. import db
 from ..config import Settings
 from ..fit.gemini import _short_error
-from ..profile_store import Links, effective_master_path, get_links
+from ..profile_store import (Links, effective_master_path, effective_output_dir,
+                             get_ai_notes, get_links)
 from . import agents
 from .agents import AgentError, Draft, DraftBullet, DraftEntry, DraftSkills
 from .check import assemble
 from .master import MasterError, load_master_with_sha
 from .model import Bullet, Link, Resume
-from .output import choose_path, company_folder, file_sha256, reusable_owned, write_atomic
+from .output import (choose_path, company_folder, file_sha256, resume_base_name, reusable_owned,
+                     write_atomic)
 from .render import fit_to_pages
 
 MAX_PAGES = 2
@@ -120,10 +122,11 @@ def _finish(conn: sqlite3.Connection, job_id: int, job: dict, settings: Settings
 
     old = db.get_resume(conn, job_id)
     owned = Path(old["path"]) if old and old.get("path") else None
+    out_dir = effective_output_dir(conn, settings)
     owned = reusable_owned(owned, old.get("file_sha256") if old else None,
-                           db.resume_paths(conn, exclude_job=job_id), settings.resume_output_dir)
-    folder = company_folder(settings.resume_output_dir, job["company"])
-    dest = choose_path(folder, job["title"], owned)
+                           db.resume_paths(conn, exclude_job=job_id), out_dir)
+    folder = company_folder(out_dir, job["company"])
+    dest = choose_path(folder, job["title"], owned, resume_base_name(resume.header.name))
     fitted: dict = {}
     step("Laying out the PDF…")
 
@@ -172,7 +175,7 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         step("Matching it to your resume…")
         matches = agents.match(client, settings, master, reqs)
         step("Writing the tailored version…")
-        draft = agents.write(client, settings, master, reqs, matches)
+        draft = agents.write(client, settings, master, reqs, matches, notes=get_ai_notes(conn))
         result, _resume = _finish(conn, job_id, job, settings, master, master_sha, reqs, matches,
                                   draft, client, step)
         return result

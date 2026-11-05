@@ -1,4 +1,6 @@
 import pytest
+from master_layout import render_master_layout
+from tailor_fakes import sample_resume
 
 from jobhunt import db
 from jobhunt.config import Settings
@@ -45,7 +47,7 @@ def resp(score=8):
 def test_build_prompt_contains_constraints():
     p = build_prompt(RESUME, "posting text", "AfterQuery", "Applied Researcher")
     assert NO_FAKE in p and FORMULA in p
-    assert "building" in p and "funding" in p
+    assert "Notes from the candidate" not in p
     assert "AfterQuery" in p and "Applied Researcher" in p
     assert "8+" in p
 
@@ -92,8 +94,8 @@ def job_id(conn):
 
 @pytest.fixture
 def s(tmp_path):
-    (tmp_path / "profile.md").write_text(RESUME)
-    return Settings(gemini_api_key="k", proficiently_dir=tmp_path)
+    render_master_layout(sample_resume(), tmp_path / "master.pdf")
+    return Settings(gemini_api_key="k", master_resume_path=tmp_path / "master.pdf")
 
 
 @pytest.mark.parametrize("score,status", [(8, "ready"), (6, "low")])

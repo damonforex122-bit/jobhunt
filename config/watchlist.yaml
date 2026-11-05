@@ -1,3 +1,4 @@
-- {name: Anthropic, ats: greenhouse, slug: anthropic, domain: anthropic.com}
-- {name: Harvey, ats: ashby, slug: harvey, domain: harvey.ai}
-- {name: Mercor, ats: ashby, slug: mercor, domain: mercor.com}
+# Companies to scan for jobs. One per line, for example:
+# - {name: Acme, ats: greenhouse, slug: acme, domain: acme.com}
+# ats is greenhouse, ashby or lever; slug is the name in the company's job-board URL.
+[]

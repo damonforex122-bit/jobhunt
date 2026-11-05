@@ -168,13 +168,13 @@ def create_app(settings: Settings) -> FastAPI:
         if resume and resume.get("path") and resume.get("master_sha256"):
             current = profile_store.effective_master_path(conn, settings)
             try:
-                stale = current.is_file() and master_sha256(current) != resume["master_sha256"]
+                stale = current is not None and current.is_file() and master_sha256(current) != resume["master_sha256"]
             except OSError:
                 stale = False
         return dict(job=job, fit=db.get_fit(conn, job["id"]),
                     people=db.list_people(conn, job["company"]),
                     resume=resume, stale=stale,
-                    can_tailor=has_ai_key(settings), output_dir=settings.resume_output_dir,
+                    can_tailor=has_ai_key(settings), output_dir=profile_store.effective_output_dir(conn, settings),
                     **extra)
 
     def jobs_page(request: Request, conn, status: str = "", min_score: str = "",
@@ -243,7 +243,8 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(404, "no tailored resume")
         path = Path(rec["path"])
         try:
-            inside = path.resolve().is_relative_to(settings.resume_output_dir.resolve())
+            inside = path.resolve().is_relative_to(
+                profile_store.effective_output_dir(conn, settings).resolve())
         except OSError:
             inside = False
         if not inside or not path.is_file():
@@ -348,6 +349,9 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/import")
     def post_import(conn: Conn, importer_fn: Annotated[Callable, Depends(get_importer)]):
+        if settings.proficiently_dir is None:
+            return RedirectResponse(f"/companies?msg={quote('No Proficiently folder set (PROFICIENTLY_DIR).')}",
+                                    status_code=303)
         try:
             r = importer_fn(conn, settings.proficiently_dir)
         except _ACTION_ERRORS as e:
@@ -372,6 +376,8 @@ def create_app(settings: Settings) -> FastAPI:
                       master=profile_store.get_master(conn),
                       master_path=profile_store.effective_master_path(conn, settings),
                       links=profile_store.get_links(conn),
+                      output_dir=profile_store.effective_output_dir(conn, settings),
+                      ai_notes=profile_store.get_ai_notes(conn),
                       prefs=profile_store.effective_preferences(conn, settings), keys=keys)
 
     @app.post("/profile/links")
@@ -381,6 +387,19 @@ def create_app(settings: Settings) -> FastAPI:
         profile_store.save_links(conn, profile_store.Links(
             website=website.strip(), github=github.strip(), linkedin=linkedin.strip()))
         return to_profile("Links saved.")
+
+    @app.post("/profile/output")
+    def post_profile_output(conn: Conn, output_dir: Annotated[str, Form()] = ""):
+        folder = output_dir.strip()
+        if not folder:
+            return to_profile("Give a folder for the tailored resumes.")
+        profile_store.put(conn, "resume_output_dir", str(Path(folder).expanduser()))
+        return to_profile("Resume output folder saved.")
+
+    @app.post("/profile/notes")
+    def post_profile_notes(conn: Conn, notes: Annotated[str, Form()] = ""):
+        profile_store.save_ai_notes(conn, notes[:5000])
+        return to_profile("Notes saved.")
 
     @app.post("/profile/preferences")
     def post_profile_preferences(conn: Conn, target_roles: Annotated[str, Form()] = "",
