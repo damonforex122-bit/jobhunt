@@ -47,7 +47,12 @@ REGISTRARS.append(finder.register)
 
 def _register_serve(sub) -> None:
     p = sub.add_parser("serve", help="Run the local web UI on 127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    def port_number(v: str) -> int:
+        if not v.isdigit() or not 1 <= int(v) <= 65535:
+            raise argparse.ArgumentTypeError(f"invalid port {v!r}: use a number from 1 to 65535")
+        return int(v)
+
+    p.add_argument("--port", type=port_number, default=8000)
     p.add_argument("--open", action="store_true", help="open the browser once the app starts")
 
     def handler(args) -> int:
@@ -76,10 +81,11 @@ def _register_serve(sub) -> None:
             raise
         finally:
             probe.close()
+        app = create_app(load_settings())
         if args.open:
             threading.Timer(1.0, webbrowser.open, [f"http://127.0.0.1:{port}"]).start()
         try:
-            uvicorn.run(create_app(load_settings()), host="127.0.0.1", port=port)
+            uvicorn.run(app, host="127.0.0.1", port=port)
         except OSError as e:
             if e.errno == errno.EADDRINUSE:
                 return busy()

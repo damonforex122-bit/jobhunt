@@ -1,5 +1,6 @@
 """First-run setup wizard (/setup): AI key, resume, links, preferences, companies, Gmail, people."""
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote, urlsplit
@@ -35,9 +36,9 @@ class Ping(BaseModel):
     ok: bool
 
 
-def get_setup_client(request: Request):
-    """The provider chain used by the Test button; None when no key is set. Tests override this."""
-    return agents.make_client(request.app.state.settings)
+def get_setup_client() -> Callable:
+    """Builds the provider chain for the Test button from a Settings (None when no key is set)."""
+    return agents.make_client
 
 
 def get_gmail_tester() -> Callable:
@@ -159,30 +160,48 @@ def register(app: FastAPI, settings: Settings, Conn, render) -> None:
         profile_store.put(conn, "setup_done", True)
         return RedirectResponse("/", status_code=303)
 
-    @app.post("/setup/test-ai", response_class=HTMLResponse)
-    def post_test_ai(request: Request, client: Annotated[object, Depends(get_setup_client)]):
-        if client is None:
-            ok, text = False, "Add an AI key first, then test it."
-        else:
-            try:
-                client.generate('Reply with {"ok": true}.', Ping, "testing the AI key")
-                ok, text = True, f"Working — answered by {_answered_by(client)}"
-            except Exception as e:  # provider errors are already masked
-                ok, text = False, short_error(e)
+    def alert(ok: bool, text: str, secrets: list[str | None]) -> HTMLResponse:
+        for secret in secrets:
+            if secret:
+                text = text.replace(secret, "***")
         return HTMLResponse(f'<div role="alert" class="alert {"alert-success" if ok else "alert-error"}">'
-                            f'{_esc(text)}</div>')
+                            f'{escape(text)}</div>')
+
+    @app.post("/setup/test-ai", response_class=HTMLResponse)
+    def post_test_ai(factory: Annotated[Callable, Depends(get_setup_client)],
+                     gemini_api_key: Annotated[str, Form()] = "",
+                     anthropic_api_key: Annotated[str, Form()] = "",
+                     openrouter_api_key: Annotated[str, Form()] = ""):
+        typed = {k: v.strip() for k, v in (("gemini_api_key", gemini_api_key),
+                                           ("anthropic_api_key", anthropic_api_key),
+                                           ("openrouter_api_key", openrouter_api_key)) if v.strip()}
+        trial = settings.model_copy(update=typed)  # typed keys are tried, never saved
+        secrets = [getattr(trial, f) for f in AI_KEYS]
+        client = factory(trial)
+        if client is None:
+            return alert(False, "Add an AI key first, then test it.", secrets)
+        try:
+            client.generate('Reply with {"ok": true}.', Ping, "testing the AI key")
+        except Exception as e:  # provider errors are already masked
+            return alert(False, short_error(e), secrets)
+        return alert(True, f"Working — answered by {_answered_by(client)}", secrets)
 
     @app.post("/setup/test-gmail", response_class=HTMLResponse)
-    def post_test_gmail(tester: Annotated[Callable, Depends(get_gmail_tester)]):
+    def post_test_gmail(tester: Annotated[Callable, Depends(get_gmail_tester)],
+                        gmail_address: Annotated[str, Form()] = "",
+                        gmail_app_password: Annotated[str, Form()] = ""):
+        typed = {}
+        if gmail_address.strip():
+            typed["gmail_address"] = gmail_address.strip()
+        password = "".join(gmail_app_password.split())
+        if password:
+            typed["gmail_app_password"] = password
+        trial = settings.model_copy(update=typed)  # typed values are tried, never saved
+        secrets = [trial.gmail_app_password, gmail_app_password.strip()]
         try:
-            ok, text = True, tester(settings)
+            return alert(True, tester(trial), secrets)
         except Exception as e:
-            text = short_error(e)
-            if settings.gmail_app_password:
-                text = text.replace(settings.gmail_app_password, "***")
-            ok = False
-        return HTMLResponse(f'<div role="alert" class="alert {"alert-success" if ok else "alert-error"}">'
-                            f'{_esc(text)}</div>')
+            return alert(False, short_error(e), secrets)
 
     @app.post("/setup/import")
     def post_setup_import(conn: Conn, importer_fn: Annotated[Callable, Depends(get_importer)]):
@@ -279,8 +298,3 @@ def register(app: FastAPI, settings: Settings, Conn, render) -> None:
             if err:
                 return page(request, conn, "people", error=err)
         return advance(conn, step)
-
-
-def _esc(text: str) -> str:
-    from html import escape
-    return escape(text)

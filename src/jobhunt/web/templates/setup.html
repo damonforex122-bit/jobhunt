@@ -27,7 +27,7 @@
 <input class="input input-bordered w-full" type="password" name="{{ f }}" placeholder="Paste a key (blank keeps the current one)" autocomplete="new-password"></label>
 {% endfor %}
 <div class="flex gap-2 items-center flex-wrap">
-<button type="button" class="btn btn-outline" hx-post="/setup/test-ai" hx-target="#test-result">Test</button>
+<button type="button" class="btn btn-outline" hx-post="/setup/test-ai" hx-include="closest form" hx-target="#test-result">Test</button>
 <span id="test-result"></span>
 </div>
 {{ nav("ai") }}
@@ -103,7 +103,7 @@
 <label class="form-control"><span class="label-text">App password {% if gmail_masked %}<code>{{ gmail_masked }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}</span>
 <input class="input input-bordered w-full" type="password" name="gmail_app_password" placeholder="Paste the app password (blank keeps the current one)" autocomplete="new-password"></label>
 <div class="flex gap-2 items-center flex-wrap">
-<button type="button" class="btn btn-outline" hx-post="/setup/test-gmail" hx-target="#test-result">Test connection</button>
+<button type="button" class="btn btn-outline" hx-post="/setup/test-gmail" hx-include="closest form" hx-target="#test-result">Test connection</button>
 <span id="test-result"></span>
 </div>
 {{ nav("gmail") }}

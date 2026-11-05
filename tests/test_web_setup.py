@@ -131,20 +131,20 @@ def fake_chain(settings, fail=False):
 
 
 def test_test_ai_ok(app, client, settings):
-    app.dependency_overrides[setup_mod.get_setup_client] = lambda: fake_chain(settings)
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: (lambda s: fake_chain(s))
     r = client.post("/setup/test-ai")
     assert "Working — answered by FakeAI" in r.text
 
 
 def test_test_ai_error_shown(app, client, settings, monkeypatch):
     monkeypatch.setattr("jobhunt.tailor.providers._sleep", lambda s: None)
-    app.dependency_overrides[setup_mod.get_setup_client] = lambda: fake_chain(settings, fail=True)
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: (lambda s: fake_chain(s, fail=True))
     r = client.post("/setup/test-ai")
     assert "FakeAI: returned" not in r.text and "boom" in r.text and "alert-error" in r.text
 
 
 def test_test_ai_without_key(app, client):
-    app.dependency_overrides[setup_mod.get_setup_client] = lambda: None
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: (lambda s: None)
     assert "Add an AI key first" in client.post("/setup/test-ai").text
 
 
@@ -347,3 +347,101 @@ def test_serve_open_starts_timer(monkeypatch):
         port = s.getsockname()[1]
     assert cli.main(["serve", "--port", str(port), "--open"]) == 0
     assert timers == [(1.0, webbrowser.open, [f"http://127.0.0.1:{port}"])]
+
+
+def test_test_ai_uses_typed_key_without_saving_or_echoing(app, client, settings):
+    seen = []
+
+    def factory(s):
+        seen.append(s.gemini_api_key)
+        return fake_chain(s)
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: factory
+    r = client.post("/setup/test-ai", data={"gemini_api_key": " TYPED-KEY-999 "})
+    assert seen == ["TYPED-KEY-999"] and "Working" in r.text
+    assert "TYPED-KEY-999" not in r.text
+    assert not settings.env_path.exists() and settings.gemini_api_key is None
+
+
+def test_test_ai_blank_falls_back_to_saved_key(app, client, settings):
+    settings.gemini_api_key = "SAVED-KEY"
+    seen = []
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: (lambda s: seen.append(s.gemini_api_key) or fake_chain(s))
+    client.post("/setup/test-ai", data={"gemini_api_key": ""})
+    assert seen == ["SAVED-KEY"]
+
+
+def test_test_ai_error_masks_saved_key(app, client, settings, monkeypatch):
+    monkeypatch.setattr("jobhunt.tailor.providers._sleep", lambda s: None)
+    settings.gemini_api_key = "SAVED-KEY-123"
+
+    class P:
+        name = "FakeAI"
+
+        def generate(self, prompt, schema):
+            raise ProviderError("bad key SAVED-KEY-123")
+    app.dependency_overrides[setup_mod.get_setup_client] = lambda: (lambda s: Chain([P()], s))
+    r = client.post("/setup/test-ai")
+    assert "SAVED-KEY-123" not in r.text and "alert-error" in r.text
+
+
+def test_test_gmail_uses_typed_values_without_saving_or_echoing(app, client, settings):
+    seen = []
+
+    def tester(s):
+        seen.append((s.gmail_address, s.gmail_app_password))
+        raise RuntimeError("login failed for " + s.gmail_app_password)
+    app.dependency_overrides[setup_mod.get_gmail_tester] = lambda: tester
+    r = client.post("/setup/test-gmail", data={"gmail_address": "new@gmail.com",
+                                                "gmail_app_password": "abcd efgh ijkl mnop"})
+    assert seen == [("new@gmail.com", "abcdefghijklmnop")]
+    assert "abcdefghijklmnop" not in r.text and "abcd efgh" not in r.text
+    assert not settings.env_path.exists() and settings.gmail_address is None
+
+
+def test_test_buttons_include_form_fields(client):
+    assert 'hx-include="closest form"' in client.get("/setup?step=ai").text
+    assert 'hx-include="closest form"' in client.get("/setup?step=gmail").text
+
+
+@pytest.mark.parametrize("nxt", ["/\\evil.com", "/%09/evil.com", "/%5Cevil.com", "//evil.com"])
+def test_next_rejects_tricky_paths(client, nxt):
+    r = client.post("/profile/master/confirm", data={"next": nxt})
+    assert location(r).startswith("/profile?msg=")
+
+
+def test_setup_page_not_redirected_or_bannered(client):
+    r = client.get("/setup")
+    assert r.status_code == 200 and "Finish setting up" not in r.text
+
+
+def test_partials_skip_banner_check(client, monkeypatch):
+    calls = []
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: calls.append(1) or orig(*a, **k))
+    client.get("/profile/master/preview", headers={"HX-Request": "true"})
+    assert calls == [1]  # only the request's own connection
+
+
+@pytest.mark.parametrize("port", ["0", "70000", "-1"])
+def test_serve_rejects_bad_port(capsys, port):
+    with pytest.raises(SystemExit):
+        cli.main(["serve", "--port", port])
+    assert "port" in capsys.readouterr().err.lower()
+
+
+def test_serve_timer_starts_after_create_app(monkeypatch):
+    import threading
+
+    import uvicorn
+    order = []
+    monkeypatch.setattr(cli, "__name__", cli.__name__)
+    monkeypatch.setattr("jobhunt.web.app.create_app", lambda s: order.append("app") or object())
+    monkeypatch.setattr(threading, "Timer", type("T", (), {
+        "__init__": lambda self, *a: order.append("timer"), "start": lambda self: None}))
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    cli.main(["serve", "--port", str(port), "--open"])
+    assert order == ["app", "timer"]

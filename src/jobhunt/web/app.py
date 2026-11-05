@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -40,6 +40,16 @@ KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
               "gmail_app_password": "Gmail app password"}
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def local_path(value: str) -> bool:
+    """True for a same-site path: starts with one '/', no backslash or control characters,
+    also after percent-decoding."""
+    for v in (value, unquote(value)):
+        if (not v.startswith("/") or v.startswith("//") or "\\" in v
+                or any(ord(c) < 32 for c in v)):
+            return False
+    return True
 
 
 def safe_url(value: str | None) -> str:
@@ -165,7 +175,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
         ctx.update(banner=_banner(settings), msg=request.query_params.get("msg"),
-                   setup_pending=setup_pending())
+                   setup_pending=False if request.headers.get("HX-Request") else setup_pending())
         return TEMPLATES.TemplateResponse(request, name, ctx)
 
     def job_or_404(conn, job_id: int) -> dict:
@@ -378,8 +388,7 @@ def create_app(settings: Settings) -> FastAPI:
     # --- profile ------------------------------------------------------------
 
     def to_profile(msg: str, next: str = "") -> RedirectResponse:
-        dest = next if (next.startswith("/") and not next.startswith("//")
-                        and "\\" not in next) else "/profile"
+        dest = next if local_path(next) else "/profile"
         sep = "&" if "?" in dest else "?"
         return RedirectResponse(f"{dest}{sep}msg={quote(msg)}", status_code=303)
 
