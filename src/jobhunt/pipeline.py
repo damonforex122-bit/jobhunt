@@ -16,7 +16,7 @@ def _status(args) -> int:
         if job is None:
             print(f"job {args.job_id} not found", file=sys.stderr)
             return 1
-        db.set_job_status(conn, args.job_id, args.stage, note=args.note)
+        db.set_job_status(conn, args.job_id, args.stage, note=args.note, source="user")
         print(f"{job['company']} - {job['title']}: {job['status']} -> {args.stage}")
         return 0
     finally:

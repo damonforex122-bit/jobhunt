@@ -269,7 +269,7 @@ def create_app(settings: Settings) -> FastAPI:
         if status not in STATUSES:
             raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
         job_or_404(conn, job_id)
-        db.set_job_status(conn, job_id, status, note=note[:1000])
+        db.set_job_status(conn, job_id, status, note=note[:1000], source="user")
         if request.headers.get("HX-Request"):  # Jobs-list dropdown or a board drop
             return TEMPLATES.TemplateResponse(request, "_status_select.html",
                                               {"j": job_or_404(conn, job_id)})

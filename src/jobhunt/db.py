@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .models import CLOSED, PIPELINE, Company, Fit, Job, Person
@@ -100,6 +100,23 @@ CREATE TABLE IF NOT EXISTS interviews (
 CREATE TABLE IF NOT EXISTS interview_seen (
     gmail_id TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,  -- import | scan | gmail | interviews | grade | digest
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    counts_json TEXT,
+    error TEXT,
+    path TEXT
+);
+CREATE TABLE IF NOT EXISTS job_materials (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER REFERENCES jobs(id),
+    folder TEXT,
+    kind TEXT,  -- resume_pdf | resume_md | resume_docx | cover_letter | apply_sheet | warm_intros | posting
+    path TEXT UNIQUE,
+    mtime TEXT
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -131,6 +148,11 @@ _ADDED_COLUMNS = [
     ("resumes", "matches_json", "TEXT"),
     ("resumes", "draft_json", "TEXT"),
     ("resumes", "final_at", "TEXT"),
+    ("jobs", "prof_score", "INTEGER"),
+    ("jobs", "prof_reason", "TEXT"),
+    ("jobs", "added_at", "TEXT"),
+    ("job_events", "source", "TEXT"),
+    ("people", "kind", "TEXT"),  # NULL = a found contact
 ]
 
 
@@ -139,6 +161,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    # Proficiently scores live on the job now, not as a fake fit (idempotent: no rows left to move).
+    conn.execute(
+        """UPDATE jobs SET
+             prof_score = COALESCE(prof_score, (SELECT f.llm_score FROM fits f
+                              WHERE f.job_id = jobs.id AND f.model = 'proficiently-import')),
+             prof_reason = COALESCE(prof_reason, (SELECT f.reasons FROM fits f
+                              WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'))
+           WHERE id IN (SELECT job_id FROM fits WHERE model = 'proficiently-import')""")
+    conn.execute("DELETE FROM fits WHERE model = 'proficiently-import'")
+    conn.execute("UPDATE jobs SET source = 'proficiently' WHERE source = 'import'")
+    conn.execute("UPDATE jobs SET added_at = first_seen WHERE added_at IS NULL")
     conn.commit()
 
 
@@ -192,19 +225,20 @@ def upsert_job(conn: sqlite3.Connection, j: Job) -> tuple[int, bool]:
     url = normalize_url(j.url)
     existing = conn.execute("SELECT * FROM jobs WHERE url = ?", (url,)).fetchone()
     if existing is None:
+        now = _now()
         cur = conn.execute(
             """INSERT INTO jobs (company, title, url, location, salary_min, salary_max,
-                   description, source, posted_at, first_seen, status, flags)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   description, source, posted_at, first_seen, status, flags, added_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (j.company, j.title, url, j.location, j.salary_min, j.salary_max,
-             j.description, j.source, j.posted_at, j.first_seen or _now(),
-             j.status, json.dumps(j.flags)),
+             j.description, j.source, j.posted_at, j.first_seen or now,
+             j.status, json.dumps(j.flags), now),
         )
         conn.commit()
         return cur.lastrowid, True
 
     updates = {f: getattr(j, f) for f in _JOB_UPDATE_FIELDS if getattr(j, f) is not None}
-    if j.flags or j.source != "import":  # a scan re-evaluates flags, so [] must clear stale ones
+    if j.flags or j.source not in ("proficiently", "import"):  # a scan re-evaluates flags, so [] must clear stale ones
         updates["flags"] = json.dumps(j.flags)
     if existing["status"] == "new":
         updates["status"] = j.status
@@ -230,18 +264,19 @@ def list_jobs(
         where.append("j.status = ?")
         args.append(status)
     if min_score is not None:
-        where.append("f.llm_score >= ?")
+        where.append("COALESCE(f.llm_score, j.prof_score) >= ?")
         args.append(min_score)
     if company is not None:
         where.append("j.company = ?")
         args.append(company)
     sql = (
-        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error, f.model AS fit_model "
+        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error, f.model AS fit_model, "
+        "j.prof_score, j.prof_reason "
         "FROM jobs j LEFT JOIN fits f ON f.job_id = j.id"
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY f.llm_score DESC, j.id DESC"
+    sql += " ORDER BY COALESCE(f.llm_score, j.prof_score) DESC, j.id DESC"
     return [_job_row(r) for r in conn.execute(sql, args).fetchall()]
 
 
@@ -300,15 +335,15 @@ def list_people(conn: sqlite3.Connection, company: str) -> list[Person]:
 
 
 def set_job_status(conn: sqlite3.Connection, job_id: int, status: str,
-                   note: str | None = None) -> None:
+                   note: str | None = None, *, source: str | None = None) -> None:
     """Set a job's status and log the change. Re-saving the same status logs only a note."""
     note = (note or "").strip() or None
     row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         return
     if row["status"] != status or note:
-        conn.execute("INSERT INTO job_events (job_id, status, note, at) VALUES (?, ?, ?, ?)",
-                     (job_id, status, note, _now()))
+        conn.execute("INSERT INTO job_events (job_id, status, note, at, source) VALUES (?, ?, ?, ?, ?)",
+                     (job_id, status, note, _now(), source))
     conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
     conn.commit()
 
@@ -468,7 +503,7 @@ def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, ac
     conn.commit()
     if accept:
         set_job_status(conn, job_id, row["suggested_status"],
-                       note=f"From Gmail: {row['subject']} ({row['received']})")
+                       note=f"From Gmail: {row['subject']} ({row['received']})", source="gmail")
     return True
 
 
@@ -539,3 +574,68 @@ def set_final(conn: sqlite3.Connection, job_id: int) -> None:
 
 def final_job_ids(conn: sqlite3.Connection) -> set[int]:
     return {r[0] for r in conn.execute("SELECT job_id FROM resumes WHERE final_at IS NOT NULL")}
+
+
+# --- runs ------------------------------------------------------------------
+
+def start_run(conn: sqlite3.Connection, kind: str, path: str | None = None) -> int:
+    cur = conn.execute("INSERT INTO runs (kind, started_at, path) VALUES (?, ?, ?)",
+                       (kind, _now(), path))
+    conn.commit()
+    return cur.lastrowid
+
+
+def finish_run(conn: sqlite3.Connection, run_id: int, counts: dict | None = None,
+               error: str | None = None) -> None:
+    conn.execute("UPDATE runs SET finished_at = ?, counts_json = ?, error = ? WHERE id = ?",
+                 (_now(), json.dumps(counts) if counts is not None else None, error, run_id))
+    conn.commit()
+
+
+def _run_row(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["counts"] = json.loads(d["counts_json"]) if d.get("counts_json") else None
+    return d
+
+
+def last_runs(conn: sqlite3.Connection) -> dict[str, dict]:
+    """The latest run of each kind."""
+    rows = conn.execute(
+        "SELECT * FROM runs WHERE id IN (SELECT MAX(id) FROM runs GROUP BY kind)").fetchall()
+    return {r["kind"]: _run_row(r) for r in rows}
+
+
+def runs_on(conn: sqlite3.Connection, local_date: date) -> list[dict]:
+    """Runs that started on the given local calendar date, oldest first."""
+    out = []
+    for r in conn.execute("SELECT * FROM runs ORDER BY id").fetchall():
+        started = datetime.fromisoformat(r["started_at"])
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if started.astimezone().date() == local_date:
+            out.append(_run_row(r))
+    return out
+
+
+# --- job materials ---------------------------------------------------------
+
+def save_material(conn: sqlite3.Connection, job_id: int, folder: str, kind: str,
+                  path: str, mtime: str) -> None:
+    conn.execute(
+        """INSERT INTO job_materials (job_id, folder, kind, path, mtime) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(path) DO UPDATE SET job_id = excluded.job_id, folder = excluded.folder,
+             kind = excluded.kind, mtime = excluded.mtime""",
+        (job_id, folder, kind, path, mtime))
+    conn.commit()
+
+
+def list_materials(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    """A job's files, newest folder first."""
+    rows = conn.execute(
+        "SELECT * FROM job_materials WHERE job_id = ? ORDER BY folder DESC, kind, id",
+        (job_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def material_paths(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT path FROM job_materials")}

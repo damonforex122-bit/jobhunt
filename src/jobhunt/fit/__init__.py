@@ -39,7 +39,8 @@ def _record(conn: sqlite3.Connection, job: dict, fit: Fit) -> Fit:
         })
     db.save_fit(conn, fit)
     if fit.llm_score is not None and job["status"] == "new":
-        db.set_job_status(conn, job_id, "ready" if fit.llm_score >= 8 else "low")
+        db.set_job_status(conn, job_id, "ready" if fit.llm_score >= 8 else "low",
+                          source="grader")
     return fit
 
 
