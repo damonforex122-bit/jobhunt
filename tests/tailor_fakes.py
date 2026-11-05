@@ -82,3 +82,20 @@ def sample_resume() -> Resume:
             EducationLine(school="Sample Institute", detail="BS, Mathematics", dates="2011 – 2015"),
         ],
     )
+
+
+class FakeGemini:
+    """Stand-in for genai.Client: returns a canned parsed object per response schema."""
+
+    def __init__(self, responses: dict | None = None, exc: Exception | None = None):
+        self.responses = responses or {}
+        self.exc = exc
+        self.calls: list[dict] = []
+        self.models = self
+
+    def generate_content(self, **kw):
+        self.calls.append(kw)
+        if self.exc:
+            raise self.exc
+        parsed = self.responses.get(kw["config"]["response_schema"])
+        return type("R", (), {"parsed": parsed})()
