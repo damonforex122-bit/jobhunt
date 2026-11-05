@@ -1,0 +1,137 @@
+{% extends "base.html" %}{% block body %}
+<div class="flex items-center justify-between flex-wrap gap-2">
+<h1 class="text-2xl font-bold">Set up jobhunt</h1>
+<form method="post" action="/setup/skip-all"><button class="btn btn-ghost btn-sm">Skip setup</button></form>
+</div>
+<ul class="steps w-full overflow-x-auto py-2">
+{% for s in steps %}<li class="step {% if loop.index0 <= index %}step-primary{% endif %}"><a href="/setup?step={{ s }}">{{ labels[s] }}</a></li>{% endfor %}
+</ul>
+{% if error %}<div role="alert" class="alert alert-error">{{ error }}</div>{% endif %}
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+
+{% macro nav(step) %}
+<div class="flex gap-2 items-center">
+<button class="btn btn-primary">Save &amp; continue</button>
+<button class="btn btn-ghost" formaction="/setup/{{ step }}/skip" formnovalidate>Skip</button>
+</div>
+{% endmacro %}
+
+{% if step == "ai" %}
+<h2 class="card-title">1. An AI key</h2>
+<p>The app uses an AI model to read your resume, grade jobs and tailor resumes. One key is enough. Gemini has a free tier.</p>
+<form method="post" action="/setup/ai" autocomplete="off" class="space-y-3">
+{% for f in ai_keys %}
+<label class="form-control"><span class="label-text">{{ ai_labels[f] }} {% if keys[f] %}<code>{{ keys[f] }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}
+ · <a class="link" href="{{ ai_links[f] }}" target="_blank" rel="noopener">get a key</a></span>
+<input class="input input-bordered w-full" type="password" name="{{ f }}" placeholder="Paste a key (blank keeps the current one)" autocomplete="new-password"></label>
+{% endfor %}
+<div class="flex gap-2 items-center flex-wrap">
+<button type="button" class="btn btn-outline" hx-post="/setup/test-ai" hx-target="#test-result">Test</button>
+<span id="test-result"></span>
+</div>
+{{ nav("ai") }}
+</form>
+
+{% elif step == "resume" %}
+<h2 class="card-title">2. Your resume</h2>
+{% if master %}<p>Active: <strong>{{ master.name }}</strong></p>
+{% elif master_path %}<p>Using the file: <code>{{ master_path }}</code></p>
+{% else %}<p>Upload your resume as a PDF. You will check how it was read before it is used.</p>{% endif %}
+<form method="post" action="/profile/master" enctype="multipart/form-data" class="flex flex-wrap gap-2 items-center">
+<input type="hidden" name="next" value="/setup?step=resume">
+<input type="file" name="file" accept="application/pdf,.pdf" class="file-input file-input-bordered" required>
+<button class="btn btn-primary">Upload</button>
+</form>
+<p class="text-sm opacity-70">Tip: no PDF handy? On LinkedIn open your profile, then More → Save to PDF.</p>
+{% include "_master_preview.html" %}
+<form method="post" action="/setup/resume">{{ nav("resume") }}</form>
+
+{% elif step == "links" %}
+<h2 class="card-title">3. Links</h2>
+<p>These appear in your resume header. Filled in from your resume when it had them.</p>
+<form method="post" action="/setup/links" class="space-y-2">
+<label class="form-control"><span class="label-text">LinkedIn</span><input class="input input-bordered w-full" name="linkedin" value="{{ links.linkedin }}"></label>
+<label class="form-control"><span class="label-text">GitHub</span><input class="input input-bordered w-full" name="github" value="{{ links.github }}"></label>
+<label class="form-control"><span class="label-text">Website</span><input class="input input-bordered w-full" name="website" value="{{ links.website }}"></label>
+{{ nav("links") }}
+</form>
+
+{% elif step == "prefs" %}
+<h2 class="card-title">4. What you are looking for</h2>
+<form method="post" action="/setup/prefs" class="space-y-2">
+<label class="form-control"><span class="label-text">Target roles, comma separated (at least one)</span><input class="input input-bordered w-full" name="target_roles" value="{{ prefs.target_roles | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Locations, comma separated (at least one, for example Remote)</span><input class="input input-bordered w-full" name="locations" value="{{ prefs.locations | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Salary floor</span><input class="input input-bordered w-full" name="salary_floor" inputmode="numeric" value="{{ prefs.salary_floor }}"></label>
+<label class="form-control"><span class="label-text">Words to look for in titles (include)</span><input class="input input-bordered w-full" name="search_terms" value="{{ prefs.search_terms | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Words to avoid (exclude)</span><input class="input input-bordered w-full" name="excluded_terms" value="{{ prefs.excluded_terms | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Notes for the AI (one per line)</span><textarea class="textarea textarea-bordered w-full" name="notes" rows="3">{{ notes }}</textarea></label>
+<label class="form-control"><span class="label-text">Folder for tailored resumes</span><input class="input input-bordered w-full" name="output_dir" value="{{ output_dir }}"></label>
+{{ nav("prefs") }}
+</form>
+
+{% elif step == "companies" %}
+<h2 class="card-title">5. Companies to watch</h2>
+<p>Paste careers-page links, one per line. Greenhouse, Ashby and Lever pages work, for example <code>https://jobs.lever.co/acme</code>.</p>
+{% if report %}
+<div role="alert" class="alert alert-info flex-col items-start">
+<p>Added {{ report.added }} {{ "company" if report.added == 1 else "companies" }}.</p>
+<p>Couldn't recognise:</p>
+<ul class="list-disc pl-5">{% for u in report.unknown %}<li>{{ u }}</li>{% endfor %}</ul>
+<form method="post" action="/setup/companies/skip"><button class="btn btn-primary btn-sm">Continue</button></form>
+</div>
+{% endif %}
+<form method="post" action="/setup/companies" class="space-y-2">
+<textarea class="textarea textarea-bordered w-full" name="urls" rows="5" placeholder="https://job-boards.greenhouse.io/acme"></textarea>
+{{ nav("companies") }}
+</form>
+{% if can_import %}<form method="post" action="/setup/import"><button class="btn btn-outline btn-sm">Import from Proficiently</button></form>{% endif %}
+<div><p class="font-semibold">Watching now</p>
+{% if companies %}<ul class="list-disc pl-5">{% for c in companies %}<li>{{ c.name }}{% if c.ats %} <span class="badge badge-outline">{{ c.ats }}</span>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="opacity-70">Nothing yet.</p>{% endif %}</div>
+
+{% elif step == "gmail" %}
+<h2 class="card-title">6. Gmail (optional)</h2>
+<p>Lets the app suggest status changes and find interviews. Read-only.</p>
+<ol class="list-decimal pl-5">
+<li>Turn on 2-Step Verification for your Google account.</li>
+<li>Open <a class="link" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>.</li>
+<li>Name it "jobhunt" and create it, then paste the 16 characters below.</li>
+</ol>
+<form method="post" action="/setup/gmail" autocomplete="off" class="space-y-2">
+<label class="form-control"><span class="label-text">Gmail address</span><input class="input input-bordered w-full" type="email" name="gmail_address" value="{{ gmail_address }}"></label>
+<label class="form-control"><span class="label-text">App password {% if gmail_masked %}<code>{{ gmail_masked }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}</span>
+<input class="input input-bordered w-full" type="password" name="gmail_app_password" placeholder="Paste the app password (blank keeps the current one)" autocomplete="new-password"></label>
+<div class="flex gap-2 items-center flex-wrap">
+<button type="button" class="btn btn-outline" hx-post="/setup/test-gmail" hx-target="#test-result">Test connection</button>
+<span id="test-result"></span>
+</div>
+{{ nav("gmail") }}
+</form>
+
+{% elif step == "people" %}
+<h2 class="card-title">7. Finding people (optional)</h2>
+<p>Apollo and Exa keys let the app suggest people to contact at a company.</p>
+<form method="post" action="/setup/people" autocomplete="off" class="space-y-2">
+{% for f in people_keys %}
+<label class="form-control"><span class="label-text">{{ people_labels[f] }} {% if keys[f] %}<code>{{ keys[f] }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}</span>
+<input class="input input-bordered w-full" type="password" name="{{ f }}" placeholder="Paste a key (blank keeps the current one)" autocomplete="new-password"></label>
+{% endfor %}
+{{ nav("people") }}
+</form>
+
+{% else %}
+<h2 class="card-title">You're set</h2>
+<div class="flex gap-2 flex-wrap">
+<form method="post" action="/scan"><button class="btn btn-primary">Scan my companies</button></form>
+<a class="btn" href="/">Add a job by link</a>
+</div>
+<ul class="list-disc pl-5">
+<li><strong>Jobs</strong>: new postings from your companies, graded against your resume.</li>
+<li><strong>Pipeline</strong>: move jobs through applied, interviewing and offer.</li>
+<li><strong>Review</strong>: open a job to tailor your resume and chat changes.</li>
+<li><strong>Profile</strong>: change anything you set here, any time.</li>
+</ul>
+{% endif %}
+</div></div>
+{% endblock %}

@@ -46,15 +46,44 @@ REGISTRARS.append(finder.register)
 
 
 def _register_serve(sub) -> None:
-    p = sub.add_parser("serve", help="Run the local web UI on 127.0.0.1:8000")
+    p = sub.add_parser("serve", help="Run the local web UI on 127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--open", action="store_true", help="open the browser once the app starts")
 
     def handler(args) -> int:
+        import errno
+        import socket
+        import threading
+        import webbrowser
+
         import uvicorn
 
         from .config import load_settings
         from .web.app import create_app
 
-        uvicorn.run(create_app(load_settings()), host="127.0.0.1", port=8000)
+        port = args.port
+
+        def busy() -> int:
+            print(f"Port {port} is busy — try `jobhunt serve --port {port + 2}`")
+            return 1
+
+        probe = socket.socket()
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                return busy()
+            raise
+        finally:
+            probe.close()
+        if args.open:
+            threading.Timer(1.0, webbrowser.open, [f"http://127.0.0.1:{port}"]).start()
+        try:
+            uvicorn.run(create_app(load_settings()), host="127.0.0.1", port=port)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                return busy()
+            raise
         return 0
 
     p.set_defaults(handler=handler)

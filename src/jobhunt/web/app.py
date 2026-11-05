@@ -31,7 +31,7 @@ from ..tailor import agents, tailor_job
 from ..tailor.master_ai import preview_summary, verify_ai_full
 from ..tailor.master import MasterError, _pdf_text, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
-from . import review
+from . import review, setup
 
 MAX_MASTER_BYTES = 10 * 1024 * 1024
 SHA_RE = re.compile(r"[0-9a-f]{64}")
@@ -156,8 +156,16 @@ def create_app(settings: Settings) -> FastAPI:
 
     Conn = Annotated[object, Depends(get_conn)]
 
+    def setup_pending() -> bool:
+        c = db.connect(settings.db_path)
+        try:
+            return not profile_store.get(c, "setup_done")
+        finally:
+            c.close()
+
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
-        ctx.update(banner=_banner(settings), msg=request.query_params.get("msg"))
+        ctx.update(banner=_banner(settings), msg=request.query_params.get("msg"),
+                   setup_pending=setup_pending())
         return TEMPLATES.TemplateResponse(request, name, ctx)
 
     def job_or_404(conn, job_id: int) -> dict:
@@ -202,6 +210,9 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
               company: str = ""):
+        if (not profile_store.get(conn, "setup_done")
+                and profile_store.effective_master_path(conn, settings) is None):
+            return RedirectResponse("/setup", status_code=303)
         return jobs_page(request, conn, status, min_score, company)
 
     @app.post("/jobs/add", response_class=HTMLResponse)
@@ -366,8 +377,11 @@ def create_app(settings: Settings) -> FastAPI:
 
     # --- profile ------------------------------------------------------------
 
-    def to_profile(msg: str) -> RedirectResponse:
-        return RedirectResponse(f"/profile?msg={quote(msg)}", status_code=303)
+    def to_profile(msg: str, next: str = "") -> RedirectResponse:
+        dest = next if (next.startswith("/") and not next.startswith("//")
+                        and "\\" not in next) else "/profile"
+        sep = "&" if "?" in dest else "?"
+        return RedirectResponse(f"{dest}{sep}msg={quote(msg)}", status_code=303)
 
     def csv(value: str) -> list[str]:
         return [p.strip() for p in value.split(",") if p.strip()]
@@ -468,12 +482,13 @@ def create_app(settings: Settings) -> FastAPI:
         return [] if problems else left[:8]
 
     @app.post("/profile/master")
-    def post_profile_master(conn: Conn, file: Annotated[UploadFile, File()]):
+    def post_profile_master(conn: Conn, file: Annotated[UploadFile, File()],
+                            next: Annotated[str, Form()] = ""):
         data = file.file.read(MAX_MASTER_BYTES + 1)
         if len(data) > MAX_MASTER_BYTES:
-            return to_profile("That file is over 10 MB.")
+            return to_profile("That file is over 10 MB.", next)
         if not data.startswith(b"%PDF-"):
-            return to_profile("That file isn't a PDF.")
+            return to_profile("That file isn't a PDF.", next)
         master_dir.mkdir(parents=True, exist_ok=True)
         tmp = master_dir / f".upload-{secrets.token_hex(8)}.tmp"
         tmp.write_bytes(data)
@@ -482,7 +497,7 @@ def create_app(settings: Settings) -> FastAPI:
                                                settings=settings)
         except MasterError as e:
             tmp.unlink(missing_ok=True)
-            return to_profile(str(e))
+            return to_profile(str(e), next)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
@@ -493,7 +508,7 @@ def create_app(settings: Settings) -> FastAPI:
             name=Path(file.filename or "master.pdf").name[:200],
             uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")),
             preview_summary(resume, left_out(resume, master_dir / f".pending-{sha}.pdf")))
-        return to_profile("Check how your resume was read, then use it.")
+        return to_profile("Check how your resume was read, then use it.", next)
 
     @app.get("/profile/master/preview", response_class=HTMLResponse)
     def get_master_preview(request: Request, conn: Conn):
@@ -501,27 +516,28 @@ def create_app(settings: Settings) -> FastAPI:
                       pending=profile_store.get_pending_master(conn))
 
     @app.post("/profile/master/confirm")
-    def post_master_confirm(conn: Conn):
+    def post_master_confirm(conn: Conn, next: Annotated[str, Form()] = ""):
         pending = profile_store.get_pending_master(conn)
         if not pending:
-            return to_profile("There is no uploaded resume waiting.")
+            return to_profile("There is no uploaded resume waiting.", next)
         info = profile_store.MasterInfo(**pending["info"])
         src = pending_file(info.sha256) if SHA_RE.fullmatch(info.sha256) else None
         if src is None or not src.is_file() or master_sha256(src) != info.sha256:
             drop_pending(conn)
-            return to_profile("That upload is gone. Please upload your resume again.")
+            return to_profile("That upload is gone. Please upload your resume again.", next)
         dest = master_dir / f"{info.sha256}.pdf"
         os.replace(src, dest)
         info.path = str(dest)
         info.uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         profile_store.save_master(conn, info)
         profile_store.clear_pending_master(conn)
-        return to_profile("Master resume saved.")
+        return to_profile("Master resume saved.", next)
 
     @app.post("/profile/master/cancel")
-    def post_master_cancel(conn: Conn):
+    def post_master_cancel(conn: Conn, cancel_next: Annotated[str, Form()] = ""):
         drop_pending(conn)
-        return to_profile("Upload discarded. Choose another file.")
+        return to_profile("Upload discarded. Choose another file.", cancel_next)
 
     review.register(app, settings, Conn, render, job_or_404)
+    setup.register(app, settings, Conn, render)
     return app

@@ -21,6 +21,7 @@
 </div>
 {% block wide %}
 <main class="max-w-6xl mx-auto p-4 space-y-3">
+{% if setup_pending and not request.url.path.startswith('/setup') %}<div role="alert" class="alert alert-info"><span>Finish setting up</span><a class="btn btn-sm" href="/setup">Continue setup</a></div>{% endif %}
 {% for b in banner %}<div role="alert" class="alert alert-warning">{{ b }}</div>{% endfor %}
 {% if msg %}<div role="alert" class="alert alert-success">{{ msg }}</div>{% endif %}
 {% block body %}{% endblock %}
