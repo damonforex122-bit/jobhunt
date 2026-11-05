@@ -161,17 +161,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
-    # Proficiently scores live on the job now, not as a fake fit (idempotent: no rows left to move).
-    conn.execute(
-        """UPDATE jobs SET
-             prof_score = COALESCE(prof_score, (SELECT f.llm_score FROM fits f
-                              WHERE f.job_id = jobs.id AND f.model = 'proficiently-import')),
-             prof_reason = COALESCE(prof_reason, (SELECT f.reasons FROM fits f
-                              WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'))
-           WHERE id IN (SELECT job_id FROM fits WHERE model = 'proficiently-import')""")
-    conn.execute("DELETE FROM fits WHERE model = 'proficiently-import'")
-    conn.execute("UPDATE jobs SET source = 'proficiently' WHERE source = 'import'")
-    conn.execute("UPDATE jobs SET added_at = first_seen WHERE added_at IS NULL")
+    # Proficiently scores live on the job now, not as a fake fit. A surviving fit is newer than the
+    # column (the importer writes one per run), so it wins. Each step is guarded so an already
+    # migrated database runs no write at all.
+    if conn.execute("SELECT 1 FROM fits WHERE model = 'proficiently-import' LIMIT 1").fetchone():
+        conn.execute(
+            """UPDATE jobs SET
+                 prof_score = COALESCE((SELECT f.llm_score FROM fits f
+                                WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'), prof_score),
+                 prof_reason = COALESCE((SELECT f.reasons FROM fits f
+                                WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'), prof_reason)
+               WHERE id IN (SELECT job_id FROM fits WHERE model = 'proficiently-import')""")
+        conn.execute("DELETE FROM fits WHERE model = 'proficiently-import'")
+    if conn.execute("SELECT 1 FROM jobs WHERE source = 'import' LIMIT 1").fetchone():
+        conn.execute("UPDATE jobs SET source = 'proficiently' WHERE source = 'import'")
+    if conn.execute("SELECT 1 FROM jobs WHERE added_at IS NULL AND first_seen IS NOT NULL LIMIT 1").fetchone():
+        conn.execute("UPDATE jobs SET added_at = first_seen WHERE added_at IS NULL AND first_seen IS NOT NULL")
     conn.commit()
 
 

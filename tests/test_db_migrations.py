@@ -167,3 +167,32 @@ def test_web_status_change_logs_user_source(tmp_path):
         assert c.execute("SELECT source FROM job_events").fetchall()[0][0] == "user"
     finally:
         c.close()
+
+
+def test_surviving_proficiently_fit_overrides_older_column_values(tmp_path):
+    path = tmp_path / "n.db"
+    c = db.connect(path)
+    jid, _ = db.upsert_job(c, Job(company="A", title="t", url="https://a.test/x", source="ats"))
+    c.execute("UPDATE jobs SET prof_score = 7, prof_reason = 'old' WHERE id = ?", (jid,))
+    c.commit()
+    db.save_fit(c, Fit(job_id=jid, keyword_score=0, llm_score=9, reasons="newer",
+                       model="proficiently-import", graded_at="2026-01-01"))
+    c.close()
+    c = db.connect(path)
+    j = db.get_job(c, jid)
+    assert (j["prof_score"], j["prof_reason"]) == (9, "newer") and db.get_fit(c, jid) is None
+    c.close()
+    c = db.connect(path)
+    j = db.get_job(c, jid)
+    assert (j["prof_score"], j["prof_reason"]) == (9, "newer")
+    c.close()
+
+
+def test_connect_on_migrated_db_writes_nothing(tmp_path):
+    _old_db(tmp_path / "o.db")
+    db.connect(tmp_path / "o.db").close()
+    c = db.connect(tmp_path / "o.db")
+    try:
+        assert c.total_changes == 0
+    finally:
+        c.close()
