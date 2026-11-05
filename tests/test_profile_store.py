@@ -91,3 +91,37 @@ def test_get_put(conn):
     profile_store.put(conn, "k", {"a": [1]})
     profile_store.put(conn, "k", {"a": [2]})
     assert profile_store.get(conn, "k") == {"a": [2]}
+
+
+import pytest
+
+
+@pytest.mark.parametrize("key,value", [
+    ("EXA_API_KEY", "k APOLLO_API_KEY=evil"),
+    ("EXA_API_KEY", "k x"),
+    ("EXA_API_KEY", "k\x85x"),
+    ("EXA_API_KEY", "k\x0bAPOLLO_API_KEY=evil"),
+    ("EXA_API_KEY", "k\x1cx"),
+    ("EXA_API_KEY", "a\nb"),
+    ("EXA_API_KEY", '"quoted'),
+    ("EXA_API_KEY", " lead"),
+    ("EXA_API_KEY", "trail "),
+    ("A=B", "x"),
+    ("lower", "x"),
+])
+def test_update_env_rejects_unsafe_and_leaves_file_unchanged(tmp_path, key, value):
+    p = tmp_path / ".env"
+    p.write_text("A=1\n")
+    with pytest.raises(ValueError):
+        update_env(p, {key: value})
+    assert p.read_text() == "A=1\n"
+    assert [f.name for f in tmp_path.iterdir()] == [".env"]
+
+
+def test_update_env_tightens_existing_644_without_temp_leftovers(tmp_path):
+    p = tmp_path / ".env"
+    p.write_text("A=1\n")
+    p.chmod(0o644)
+    update_env(p, {"EXA_API_KEY": "secret"})
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+    assert [f.name for f in tmp_path.iterdir()] == [".env"]
