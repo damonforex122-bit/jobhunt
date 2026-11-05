@@ -3,6 +3,9 @@
 <p class="flex flex-wrap items-center gap-2">{{ job.location or '' }} {% with flags=job.flags %}{% include "_flags.html" %}{% endwith %}
 {% if job.salary_min or job.salary_max %}<span class="badge badge-outline">${{ job.salary_min or '?' }}&ndash;{{ job.salary_max or '?' }}</span>{% endif %}
 <a class="link link-primary" href="{{ job.url|safe_url }}" rel="noopener noreferrer">posting</a></p>
+{% if (fit and fit.llm_score is not none) or job.prof_score is not none %}<p class="flex flex-wrap items-center gap-2">
+{% if fit and fit.llm_score is not none %}<span class="badge badge-primary">Fit {{ fit.llm_score }}/10</span>{% endif %}
+{% if job.prof_score is not none %}<span class="badge badge-secondary" {% if job.prof_reason %}title="{{ job.prof_reason }}"{% endif %}>Proficiently {{ job.prof_score }}</span>{% endif %}</p>{% endif %}
 <form method="post" action="/jobs/{{ job.id }}/status" class="flex flex-wrap items-center gap-2">
   <select name="status" class="select select-bordered">
   {% for group, items in [('Triage', triage), ('Pipeline', pipeline), ('Closed', closed)] %}<optgroup label="{{ group }}">
@@ -13,6 +16,11 @@
 {% if events %}<h2 class="text-xl font-semibold">History</h2><ul class="history space-y-1">
 {% for e in events|reverse %}<li><span class="text-sm opacity-60">{{ e.at[:10] }}</span> <b>{{ e.status }}</b>{% if e.note %} &mdash; {{ e.note }}{% endif %}</li>{% endfor %}
 </ul>{% endif %}
+{% if materials %}<div class="card bg-base-200"><div class="card-body p-4 space-y-2">
+<h2 class="card-title">Prepared by Proficiently</h2>
+<ul class="flex flex-wrap gap-x-4 gap-y-1">{% for m in materials %}<li><a class="link link-primary" href="/files/{{ m.id }}">{{ m.label }}</a> <small class="opacity-60">{{ m.folder }}</small></li>{% endfor %}</ul>
+{% if needs %}<div><b>Needs Georgia</b><ul class="list-disc ml-6">{% for n in needs %}<li>{{ n|replace('- ','',1)|replace('* ','',1) }}</li>{% endfor %}</ul></div>{% endif %}
+</div></div>{% endif %}
 {% include "_fit.html" %}
 {% include "_resume.html" %}
 {% include "_people.html" %}
