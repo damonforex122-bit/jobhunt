@@ -180,7 +180,7 @@ def write(client, settings: Settings, resume: Resume, reqs: Requirements, matche
 
 Rules:
 - Use only facts in the cited source bullets. Every bullet you write must cite at least one source_id from the same entry (the ids of master bullets in that entry).
-- Write each bullet in the form "Accomplished [X] as measured by [Y], by doing [Z]" where the source supports it.
+- Write each bullet as one or two short, plain sentences that lead with what she did and state the result, e.g. "Built a search index for support tickets. Lookup time dropped from 2 minutes to 5 seconds." Show impact (the X, Y and Z of the work) in natural wording; never use the template phrases "as measured by" or "by doing".
 - no new numbers, metrics, tools, domains, employers, dates or outcomes beyond what the cited sources state. Keep every number you use exactly as in the source.
 - use the posting's wording only where the source supports it. Never add a skill or claim the sources do not show.
 - Fewer honest bullets are better than stretched ones. Drop weak bullets rather than padding.

@@ -86,7 +86,7 @@ def test_writer_prompt_states_xyz_and_rules():
     client = FakeGemini(all_responses())
     agents.write(client, settings(), sample_resume(), reqs(), matches())
     p = client.calls[0]["contents"]
-    for phrase in ("Accomplished [X] as measured by [Y], by doing [Z]", "no new numbers",
+    for phrase in ("short, plain sentences that lead with what she did", "never use the template phrases", "no new numbers",
                    "keep category names", "use the posting's wording only where the source supports it",
                    "at least one source_id from the same entry", "flattened"):
         assert phrase in p
