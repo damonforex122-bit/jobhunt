@@ -69,8 +69,65 @@ def test_load_master_unverifiable(conn, tmp_path, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM master_cache").fetchone()[0] == 0
 
 
+def _rendered(tmp_path):
+    p = tmp_path / "m.pdf"
+    render_pdf(sample_resume(), p)
+    return _pdf_text(p)
+
+
+def test_verify_flags_dropped_bullet(tmp_path):
+    text = _rendered(tmp_path)
+    r = sample_resume()
+    del r.experience[0].bullets[2]
+    assert verify(r, text)
+
+
+def test_verify_flags_dropped_entry_and_skill_item(tmp_path):
+    text = _rendered(tmp_path)
+    r = sample_resume()
+    del r.experience[1]
+    assert verify(r, text)
+    r = sample_resume()
+    r.skills[0].items.pop()
+    assert verify(r, text)
+
+
+def test_verify_flags_bullet_moved_to_other_entry(tmp_path):
+    text = _rendered(tmp_path)
+    r = sample_resume()
+    moved = r.experience[0].bullets.pop(1)
+    r.experience[1].bullets.append(moved)
+    assert verify(r, text)
+
+
+def test_verify_flags_skill_item_moved_to_other_category(tmp_path):
+    text = _rendered(tmp_path)
+    r = sample_resume()
+    r.skills[1].items.append(r.skills[0].items.pop())
+    assert verify(r, text)
+
+
+def test_verify_flags_swapped_title_and_dates(tmp_path):
+    text = _rendered(tmp_path)
+    r = sample_resume()
+    e = r.experience[0]
+    e.title, e.dates = e.dates, e.title
+    assert verify(r, text)
+
+
+def test_load_master_ignores_cache_from_older_parser(conn, tmp_path, monkeypatch):
+    p = tmp_path / "m.pdf"
+    render_pdf(sample_resume(), p)
+    stale = sample_resume()
+    stale.summary = "stale cached parse"
+    sha = master.master_sha256(p)
+    db.save_master_cache(conn, f"{sha}:v{master.PARSER_VERSION - 1}", stale.model_dump_json())
+    assert load_master(conn, p) == sample_resume()
+    monkeypatch.setattr(master, "PARSER_VERSION", master.PARSER_VERSION + 1)
+    assert load_master(conn, p) == sample_resume()  # reparsed under the new version
+
+
 def test_settings_expand_home():
-    s = Settings()
-    assert "~" not in str(s.master_resume_path) and "~" not in str(s.resume_output_dir)
-    assert s.master_resume_path.name == "Georgia Liu - Master Resume.pdf"
-    assert db.get_master_cache is not None
+    s = Settings(master_resume_path="~/x", resume_output_dir="~/y")
+    assert "~" not in str(s.master_resume_path) and s.master_resume_path.name == "x"
+    assert "~" not in str(s.resume_output_dir) and s.resume_output_dir.name == "y"

@@ -293,19 +293,73 @@ def _squash(text: str) -> str:
     return "".join(text.split())
 
 
-def verify(resume: Resume, pdf_text: str) -> list[str]:
-    """Strings of the parsed resume that don't appear in the PDF's own text (whitespace ignored)."""
-    haystack = _squash(pdf_text)
+PARSER_VERSION = 1  # bump when the parser or the Resume model changes: invalidates cached parses
+UNCOVERED_TOLERANCE = 0  # characters of PDF text no parsed string accounts for
+_SEPARATORS = "●•|:,"
+
+
+def _expected(resume: Resume) -> list[tuple[str, bool]]:
+    """Every parsed string in document order; the flag marks the first string of a bullet."""
     h = resume.header
-    strings: list[str] = [h.name, *h.contact, *(link.label for link in h.links), resume.summary]
+    out: list[tuple[str, bool]] = [(h.name, False)]
+    out += [(p, False) for p in [*h.contact, *(link.label for link in h.links)]]
+    out.append((resume.summary, False))
     for e in resume.experience:
-        strings += [e.org, e.location, e.title, e.dates, e.blurb, *(b.text for b in e.bullets)]
-    strings += ["".join(r.text for r in pub) for pub in resume.publications]
-    for s in resume.skills:
-        strings += [s.name, *s.items]
+        out += [(e.org, False), (e.location, False), (e.title, False), (e.dates, False), (e.blurb, False)]
+        out += [(b.text, True) for b in e.bullets]
+    out += [("".join(r.text for r in pub), True) for pub in resume.publications]
+    for sk in resume.skills:
+        out += [(sk.name, True), *((i, False) for i in sk.items)]
     for ed in resume.education:
-        strings += [ed.school, ed.detail, ed.dates]
-    return [s for s in strings if s and _squash(s) not in haystack]
+        out += [(ed.school, True), (ed.detail, False), (ed.dates, False)]
+    return [(t, f) for t, f in out if t]
+
+
+def verify(resume: Resume, pdf_text: str) -> list[str]:
+    """Problems with the parse, as strings; empty means it checks out against the PDF's own text.
+
+    Whitespace is ignored. Checks: each string is in the text, in Resume order, with each bullet
+    right after a bullet glyph; glyph count equals bullet count; and the parsed strings account
+    for (nearly) all of the text, so dropped content fails.
+    """
+    hay = _squash(pdf_text)
+    expected = _expected(resume)
+    problems: list[str] = []
+    covered = [False] * len(hay)
+    pos = 0
+    for text, is_bullet in expected:
+        needle = _squash(text)
+        hits = [(hay.find(g + needle, pos), len(g)) for g in BULLET_GLYPHS] if is_bullet else [(hay.find(needle, pos), 0)]
+        hits = [(i, g) for i, g in hits if i >= 0]
+        if not hits:
+            problems.append(text)
+            continue
+        i, g = min(hits)
+        for k in range(i, i + g + len(needle)):
+            covered[k] = True
+        pos = i + g + len(needle)
+    n_bullets = sum(1 for _, is_bullet in expected if is_bullet)
+    n_glyphs = sum(hay.count(g) for g in BULLET_GLYPHS)
+    if n_glyphs != n_bullets:
+        problems.append(f"{n_glyphs} bullets in the PDF but {n_bullets} parsed")
+    if problems:  # leftover text is a consequence of those, not a separate finding
+        return problems
+    leftover = 0
+    run = ""
+    for ch, c in zip(hay + "\0", [*covered, True]):  # sentinel flushes the last run
+        if c or ch in _SEPARATORS:
+            is_heading = run.isupper() and any(key in run for key, _ in SECTION_KEYS)
+            leftover += 0 if is_heading else len(run)
+            run = ""
+        else:
+            run += ch
+    if leftover > UNCOVERED_TOLERANCE:
+        problems.append(f"{leftover} characters of the PDF were not parsed")
+    return problems
+
+
+def master_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
@@ -313,8 +367,8 @@ def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
     path = Path(path)
     if not path.is_file():
         raise MasterError(f"Master resume not found: {path}")
-    sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    cached = db.get_master_cache(conn, sha)
+    key = f"{master_sha256(path)}:v{PARSER_VERSION}"
+    cached = db.get_master_cache(conn, key)
     if cached:
         return Resume.model_validate_json(cached)
     try:
@@ -325,6 +379,6 @@ def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
     if missing:
         shown = "; ".join(repr(m[:40]) for m in missing[:3])
         raise MasterError(short_error(Exception(
-            f"Couldn't read the master resume reliably: {len(missing)} parsed strings are not in the PDF, e.g. {shown}")))
-    db.save_master_cache(conn, sha, resume.model_dump_json())
+            f"Couldn't read the master resume reliably: {len(missing)} problems, e.g. {shown}")))
+    db.save_master_cache(conn, key, resume.model_dump_json())
     return resume
