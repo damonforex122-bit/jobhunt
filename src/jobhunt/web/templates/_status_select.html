@@ -1,0 +1,6 @@
+<select name="status" aria-label="Status for {{ j.company }} — {{ j.title }}"
+        class="select select-xs select-bordered w-36"
+        hx-post="/jobs/{{ j.id }}/status" hx-trigger="change" hx-target="this" hx-swap="outerHTML">
+{% for group, items in status_groups %}<optgroup label="{{ group }}">
+{% for s in items %}<option value="{{ s }}"{{ ' selected' if s == j.status }}>{{ s }}</option>{% endfor %}</optgroup>
+{% endfor %}</select>

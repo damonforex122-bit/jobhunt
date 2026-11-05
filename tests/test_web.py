@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -565,3 +567,82 @@ def test_favicon_served_not_404(tmp_path):
     r = client.get("/favicon.ico")
     assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
     assert 'rel="icon"' in client.get("/").text
+
+
+# --- quick status changes: Jobs list dropdown and Pipeline drag-and-drop ------
+
+HX = {"HX-Request": "true"}
+
+
+def _status_and_events(settings, job_id):
+    conn = db.connect(settings.db_path)
+    try:
+        return db.get_job(conn, job_id)["status"], len(db.list_events(conn, job_id))
+    finally:
+        conn.close()
+
+
+def test_jobs_list_has_inline_status_select(client):
+    html = client.get("/").text
+    assert 'hx-post="/jobs/1/status"' in html and 'hx-trigger="change"' in html
+    for group in ("Triage", "Pipeline", "Closed"):
+        assert f'<optgroup label="{group}">' in html
+
+
+def test_inline_status_change_returns_select_and_logs_event(client, settings):
+    before = _status_and_events(settings, 1)[1]
+    r = client.post("/jobs/1/status", data={"status": "applied"}, headers=HX)
+    assert r.status_code == 200 and "<select" in r.text and "<html" not in r.text  # a fragment
+    assert '<option value="applied" selected>' in r.text
+    status, events = _status_and_events(settings, 1)
+    assert status == "applied" and events == before + 1
+
+
+def test_same_status_again_logs_nothing(client, settings):
+    client.post("/jobs/1/status", data={"status": "applied"}, headers=HX)
+    events = _status_and_events(settings, 1)[1]
+    client.post("/jobs/1/status", data={"status": "applied"}, headers=HX)
+    assert _status_and_events(settings, 1)[1] == events
+
+
+def test_non_htmx_status_post_still_redirects(client):
+    r = client.post("/jobs/1/status", data={"status": "screening"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/jobs/1"
+
+
+def test_bad_status_is_rejected(client, settings):
+    r = client.post("/jobs/1/status", data={"status": "hired!"}, headers=HX)
+    assert r.status_code == 422 and _status_and_events(settings, 1)[0] != "hired!"
+
+
+def test_board_fragment_has_columns_closed_targets_and_draggable_cards(client, settings):
+    conn = db.connect(settings.db_path)
+    db.set_job_status(conn, 1, "applied")
+    db.set_job_status(conn, 2, "rejected")
+    conn.close()
+    html = client.get("/pipeline/board").text
+    for stage in ("applied", "screening", "interviewing", "offer", "rejected", "withdrawn", "accepted"):
+        assert f'data-status="{stage}"' in html
+    assert 'data-job-id="1"' in html and 'data-job-id="2"' in html
+    rejected = html[html.index('data-status="rejected"'):html.index('data-status="withdrawn"')]
+    assert 'data-job-id="2"' in rejected   # closed jobs are cards in their closed column
+
+
+def test_pipeline_page_includes_board_and_sortable(client):
+    html = client.get("/pipeline").text
+    assert 'id="board"' in html and re.search(r"sortablejs@\d+\.\d+\.\d+/", html)
+
+
+def test_drop_on_board_changes_status_seen_by_jobs_list(client, settings):
+    client.post("/jobs/1/status", data={"status": "interviewing"}, headers=HX)
+    jobs = client.get("/").text
+    row = jobs[jobs.index("Evals Lead"):]
+    assert '<option value="interviewing" selected>' in row[:row.index("</tr>")]
+    board = client.get("/pipeline/board").text
+    col = board[board.index('data-status="interviewing"'):board.index('data-status="offer"')]
+    assert 'data-job-id="1"' in col
+
+
+def test_pages_refresh_when_tab_regains_focus(client):
+    assert 'data-refresh-on-focus="#jobs-table"' in client.get("/").text
+    assert 'data-refresh-on-focus="#board"' in client.get("/pipeline").text

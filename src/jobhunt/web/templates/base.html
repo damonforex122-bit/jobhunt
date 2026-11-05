@@ -26,4 +26,19 @@
 {% block body %}{% endblock %}
 </main>
 {% endblock %}
+<script>
+// Pages that show statuses refresh their main area when you come back to the tab,
+// so a change made on another page (Jobs list ↔ Pipeline board) shows up.
+(function () {
+  var hiddenAt = 0;
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (Date.now() - hiddenAt < 1000) return;
+    document.querySelectorAll("[data-refresh-on-focus]").forEach(function (el) {
+      var sel = el.getAttribute("data-refresh-on-focus");
+      if (window.htmx) htmx.ajax("GET", location.href, {target: sel, select: sel, swap: "outerHTML"});
+    });
+  });
+})();
+</script>
 </body></html>

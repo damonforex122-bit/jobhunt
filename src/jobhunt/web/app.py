@@ -45,6 +45,7 @@ def safe_url(value: str | None) -> str:
 
 
 TEMPLATES.env.filters["safe_url"] = safe_url
+TEMPLATES.env.globals["status_groups"] = [("Triage", TRIAGE), ("Pipeline", PIPELINE), ("Closed", CLOSED)]
 
 
 def _local_when(iso: str | None) -> str:
@@ -263,12 +264,15 @@ def create_app(settings: Settings) -> FastAPI:
                       **panel_ctx(conn, job, people_error=error, skipped=skipped))
 
     @app.post("/jobs/{job_id}/status")
-    def post_status(job_id: int, conn: Conn, status: Annotated[str, Form()],
+    def post_status(request: Request, job_id: int, conn: Conn, status: Annotated[str, Form()],
                     note: Annotated[str, Form()] = ""):
         if status not in STATUSES:
             raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
         job_or_404(conn, job_id)
         db.set_job_status(conn, job_id, status, note=note[:1000])
+        if request.headers.get("HX-Request"):  # Jobs-list dropdown or a board drop
+            return TEMPLATES.TemplateResponse(request, "_status_select.html",
+                                              {"j": job_or_404(conn, job_id)})
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.get("/pipeline", response_class=HTMLResponse)
@@ -278,6 +282,11 @@ def create_app(settings: Settings) -> FastAPI:
                       suggestions=db.list_gmail_suggestions(conn),
                       gmail_connected=settings.gmail_token.exists(),
                       upcoming_interviews=len(db.list_interviews(conn, now=_now_iso())))
+
+    @app.get("/pipeline/board", response_class=HTMLResponse)
+    def pipeline_board_fragment(request: Request, conn: Conn):
+        return TEMPLATES.TemplateResponse(request, "_board.html", {
+            "board": db.pipeline_board(conn), "pipeline": PIPELINE, "closed": CLOSED})
 
     @app.get("/interviews", response_class=HTMLResponse)
     def interviews_page(request: Request, conn: Conn):

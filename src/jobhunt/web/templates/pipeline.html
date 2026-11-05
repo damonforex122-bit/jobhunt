@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block body %}
 <h1 class="text-2xl font-bold">Pipeline</h1>
-<p class="text-sm opacity-60">Move a job here by setting its status on the job page, or with <code>jobhunt status &lt;id&gt; applied</code>.</p>
+<p class="text-sm opacity-60">Drag cards between stages, change a status from the Jobs list, or run <code>jobhunt status &lt;id&gt; applied</code>.</p>
 <h2 class="text-xl font-semibold">Suggested from Gmail</h2>
 <div class="flex items-center gap-2">
 <form method="post" action="/gmail/sync"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>
@@ -15,18 +15,42 @@
 <form method="post" action="/gmail/suggestions/{{ s.id }}/dismiss" class="inline"><button class="btn btn-ghost btn-sm">Dismiss</button></form></td></tr>{% endfor %}
 </tbody></table></div>{% else %}<p class="text-sm opacity-60">No suggestions right now.</p>{% endif %}
 <h2 class="text-xl font-semibold">Stages</h2>
-<div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-{% for stage in pipeline %}<div class="card bg-base-200"><div class="card-body p-3 gap-2"><h3 class="font-semibold capitalize">{{ stage }} <span class="badge badge-neutral">{{ board[stage]|length }}</span></h3>
-{% for j in board[stage] %}<div class="card bg-base-100 shadow-sm"><div class="card-body p-3 gap-1"><div class="font-semibold">{{ j.company }}</div>
-<a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a>
-<div class="text-sm opacity-60">in stage since {{ (j.stage_since or '')[:10] }}{% if j.applied_at and stage != 'applied' %} &middot; applied {{ j.applied_at[:10] }}{% endif %}{% if j.llm_score is not none %} &middot; fit <span class="badge badge-primary badge-sm">{{ j.llm_score }}</span>{% endif %}</div>
-{% if j.last_note %}<div>{{ j.last_note }}</div>{% endif %}</div></div>
-{% else %}<div class="text-sm opacity-60">None yet</div>{% endfor %}</div></div>{% endfor %}
-</div>
-<h2 class="text-xl font-semibold">Closed</h2>
-<p class="text-sm opacity-60">{% for stage in closed %}{{ stage }} {{ board[stage]|length }}{{ " · " if not loop.last }}{% endfor %}</p>
-<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Outcome</th><th>Company</th><th>Title</th><th>Date</th><th>Note</th></tr></thead><tbody>
-{% for stage in closed %}{% for j in board[stage] %}<tr><td><span class="badge badge-outline">{{ stage }}</span></td><td>{{ j.company }}</td>
-<td><a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ (j.stage_since or '')[:10] }}</td><td>{{ j.last_note or '' }}</td></tr>{% endfor %}{% endfor %}
-{% if not (board.accepted or board.rejected or board.withdrawn) %}<tr><td colspan="5" class="opacity-60">Nothing closed yet.</td></tr>{% endif %}
-</tbody></table></div>{% endblock %}
+<p class="text-sm opacity-60">Drag a card to another column to change its status.</p>
+{% include "_board.html" %}
+<div id="board-error" role="alert" class="alert alert-error hidden"></div>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+(function () {
+  function showError(msg) {
+    var el = document.getElementById("board-error");
+    el.textContent = msg; el.classList.remove("hidden");
+    setTimeout(function () { el.classList.add("hidden"); }, 6000);
+  }
+  function refreshBoard() {
+    return htmx.ajax("GET", "/pipeline/board", {target: "#board", swap: "outerHTML"});
+  }
+  function wire() {
+    document.querySelectorAll("#board .board-col").forEach(function (col) {
+      if (col._sortable) return;
+      col._sortable = Sortable.create(col, {
+        group: "pipeline", animation: 150, ghostClass: "opacity-40",
+        filter: "select, a", preventOnFilter: false,
+        onAdd: function (evt) {
+          var id = evt.item.dataset.jobId, status = evt.to.dataset.status;
+          var body = new URLSearchParams({status: status});
+          fetch("/jobs/" + id + "/status", {method: "POST", body: body,
+                headers: {"HX-Request": "true"}, credentials: "same-origin"})
+            .then(function (r) {
+              if (!r.ok) throw new Error("Couldn't save that move (" + r.status + ").");
+            })
+            .catch(function (e) { showError(e.message); })
+            .finally(refreshBoard);
+        }
+      });
+    });
+  }
+  wire();
+  document.body.addEventListener("htmx:afterSettle", wire);
+})();
+</script>
+{% endblock %}
