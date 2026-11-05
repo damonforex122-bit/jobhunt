@@ -84,9 +84,63 @@ def test_new_proper_noun_rejected():
     assert resume.experience[0].bullets[0].text == MASTER.experience[0].bullets[1].text
 
 
-def test_first_word_of_sentence_is_not_checked():
-    d = one_bullet_draft("Kubernetes is not here. Designed the event pipeline.", ["e0b1"])
-    assert deterministic_problems(d, MASTER) == {}
+def test_first_word_of_text_and_sentence_is_not_checked():
+    d = one_bullet_draft("Kubernetes is not here. Terraform handled it.", ["e0b1"])
+    assert "Kubernetes" not in deterministic_problems(d, MASTER).get("b0", "")
+
+
+def test_capitalized_terms_match_whole_tokens():
+    for text in ("Wrote it in R.", "Built it with Spring.", "Wrote it in Java."):
+        assert "b0" in deterministic_problems(one_bullet_draft(text, ["e0b1"]), MASTER), text
+
+
+def test_only_sentence_start_is_exempt():
+    for text in (
+        "Tools: Kubernetes and the pipeline.",
+        "Designed it; Kubernetes managed it.",
+        "Designed it, e.g. Kubernetes based.",
+        "e.g. Kubernetes based.",
+    ):
+        assert "Kubernetes" in deterministic_problems(one_bullet_draft(text, ["e0b1"]), MASTER).get("b0", ""), text
+
+
+def test_summary_goes_to_judge_and_rejection_falls_back():
+    d = clean_draft()
+    d.summary = "Engineer who ships data products."
+    seen = []
+
+    def judge(pairs):
+        seen.append(pairs)
+        return Verdicts(verdicts=[
+            Verdict(index=i, supported=i != len(pairs) - 1, reason="overclaims") for i in range(len(pairs))
+        ])
+
+    resume, _, fallbacks = assemble(d, MASTER, judge)
+    assert len(seen) == 1
+    text, sources = seen[0][-1]
+    assert text == d.summary and sources[0] == MASTER.summary and len(sources) == 1 + len(MASTER.all_bullets())
+    assert resume.summary == MASTER.summary
+    assert len(fallbacks) == 1 and "overclaims" in fallbacks[0]
+
+
+def test_empty_bullet_fails_and_duplicate_verdicts_any_false_wins():
+    assert "b0" in deterministic_problems(one_bullet_draft("  ", ["e0b1"]), MASTER)
+    d = one_bullet_draft("Designed the event pipeline.", ["e0b1"])
+
+    def judge(pairs):
+        return Verdicts(verdicts=[Verdict(index=0, supported=True, reason=""), Verdict(index=0, supported=False, reason="no")]
+                        + [Verdict(index=1, supported=True, reason="")])
+
+    resume, _, fallbacks = assemble(d, MASTER, judge)
+    assert any("(no)" in f for f in fallbacks)
+
+
+def test_skill_items_use_master_spelling_and_dedupe():
+    d = clean_draft()
+    d.skills = [DraftSkills(category_id="s0", items=["python", "PYTHON", "Sql"])]
+    resume, _, fallbacks = assemble(d, MASTER, all_ok)
+    assert resume.skills[0].items == ["Python", "SQL"]
+    assert fallbacks == []
 
 
 def test_judge_rejection_falls_back_and_receives_only_survivors():
@@ -96,10 +150,10 @@ def test_judge_rejection_falls_back_and_receives_only_survivors():
 
     def judge(pairs):
         seen.append(pairs)
-        return Verdicts(verdicts=[Verdict(index=0, supported=False, reason="overclaims"), Verdict(index=1, supported=True, reason=""), Verdict(index=2, supported=True, reason="")])
+        return Verdicts(verdicts=[Verdict(index=0, supported=False, reason="overclaims"), Verdict(index=1, supported=True, reason=""), Verdict(index=2, supported=True, reason=""), Verdict(index=3, supported=True, reason="")])
 
     resume, _, fallbacks = assemble(d, MASTER, judge)
-    assert len(seen) == 1 and len(seen[0]) == 3  # 4 bullets, 1 failed deterministically
+    assert len(seen) == 1 and len(seen[0]) == 4  # 3 surviving bullets + summary
     assert seen[0][0] == (d.entries[0].bullets[0].text, [MASTER.experience[0].bullets[0].text])
     assert resume.experience[0].bullets[0].text == MASTER.experience[0].bullets[0].text
     assert len(fallbacks) == 2

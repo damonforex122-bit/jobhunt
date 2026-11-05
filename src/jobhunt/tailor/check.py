@@ -12,17 +12,19 @@ from jobhunt.tailor.agents import Draft, DraftEntry, Verdicts
 from jobhunt.tailor.model import Bullet, Entry, Resume, SkillCategory
 
 _CAP_TERM = re.compile(r"[A-Z][\w.+#-]*")
-_SENTENCE_SPLIT = re.compile(r"(?:\.|;|:)\s+")
+# Sentence start: ". " but not after "e.g." / "i.e.".
+_SENTENCE_SPLIT = re.compile(r"(?<!e\.g)(?<!i\.e)\.\s+")
 
 
 def _new_terms(text: str, master_text: str) -> list[str]:
     """Capitalized terms (not sentence-initial) that the master never uses."""
+    master_terms = {t.rstrip(".-") for t in _CAP_TERM.findall(master_text)}
     missing: list[str] = []
     for sentence in _SENTENCE_SPLIT.split(text):
         words = sentence.split()
         for term in _CAP_TERM.findall(" ".join(words[1:])):
             term = term.rstrip(".-")
-            if term and term not in master_text and term not in missing:
+            if term and term not in master_terms and term not in missing:
                 missing.append(term)
     return missing
 
@@ -72,6 +74,9 @@ def deterministic_problems(draft: Draft, master: Resume) -> dict[str, str]:
         if entry is None:
             problems[f"b{i}"] = f"unknown entry {entry_id}"
             continue
+        if not db.text.strip():
+            problems[f"b{i}"] = "empty bullet"
+            continue
         if not db.source_ids:
             problems[f"b{i}"] = "no source bullets"
             continue
@@ -120,15 +125,31 @@ def assemble(
         (i, db) for i, first, _eid, db in _flat_bullets(draft) if first and f"b{i}" not in problems
     ]
     judge_reasons: dict[int, str] = {}
-    if survivors:
-        verdicts = judge_fn([(db.text, [master_bullets[s].text for s in db.source_ids]) for _, db in survivors])
-        by_index = {v.index: v for v in verdicts.verdicts}
+    pairs = [(db.text, [master_bullets[s].text for s in db.source_ids]) for _, db in survivors]
+    summary_pos = None
+    if "summary" not in problems:
+        summary_pos = len(pairs)
+        pairs.append((draft.summary, [master.summary, *(b.text for b in master_bullets.values())]))
+    summary_judge_reason: str | None = None
+    if pairs:
+        verdicts = judge_fn(pairs)
+        by_index: dict[int, list] = {}
+        for v in verdicts.verdicts:
+            by_index.setdefault(v.index, []).append(v)
+
+        def judged(pos: int) -> str | None:
+            vs = by_index.get(pos)
+            if not vs:
+                return "no verdict from the checker"
+            bad = next((v for v in vs if not v.supported), None)
+            return (bad.reason or "not supported by the source") if bad else None
+
         for pos, (i, _db) in enumerate(survivors):
-            v = by_index.get(pos)
-            if v is None:
-                judge_reasons[i] = "no verdict from the checker"
-            elif not v.supported:
-                judge_reasons[i] = v.reason or "not supported by the source"
+            reason = judged(pos)
+            if reason:
+                judge_reasons[i] = reason
+        if summary_pos is not None:
+            summary_judge_reason = judged(summary_pos)
 
     # Flat index of each first-occurrence draft entry's bullets.
     flat_by_entry: dict[str, list[tuple[int, object]]] = {}
@@ -181,8 +202,9 @@ def assemble(
                 ranking.append(b.id)
 
     summary = draft.summary
-    if "summary" in problems:
-        fallbacks.append(_note(draft.summary, problems["summary"]))
+    summary_reason = problems.get("summary") or summary_judge_reason
+    if summary_reason:
+        fallbacks.append(_note(draft.summary, summary_reason))
         summary = master.summary
 
     draft_skills: dict[str, list[str]] = {}
@@ -197,7 +219,9 @@ def assemble(
             fallbacks.append(_note(", ".join(items), problems[f"s{cat.id}"]))
             skills.append(cat)
         else:
-            skills.append(cat.model_copy(update={"items": list(items)}))
+            spelling = {x.casefold(): x for x in cat.items}
+            kept = list(dict.fromkeys(spelling[x.casefold()] for x in items))
+            skills.append(cat.model_copy(update={"items": kept}))
 
     tailored = master.model_copy(update={"summary": summary, "experience": experience, "skills": skills})
     return tailored, ranking, fallbacks
