@@ -106,3 +106,14 @@ def test_tailor_uses_uploaded_master_and_profile_links(conn, tmp_path):
             for a in p.get("/Annots", []) if "/A" in a.get_object()}
     assert "https://github.com/new-me" in uris
     assert "https://github.example.com/alex" not in uris
+
+
+def test_unreadable_uploaded_master_is_an_error_not_a_fallback(conn, tmp_path, monkeypatch):
+    jid, s, seen = _grade_setup(conn, tmp_path, monkeypatch)
+    profile_store.save_master(conn, MasterInfo(path=str(tmp_path / "gone.pdf"), sha256="ab",
+                                               name="gone.pdf", uploaded_at="2026-01-01"))
+    fit = grade_job(conn, jid, s)
+    assert fit.error.startswith("Couldn't read your uploaded master resume:")
+    assert fit.llm_score is None
+    assert "resume" not in seen  # the grader never saw the proficiently text
+    assert db.get_fit(conn, jid).error == fit.error

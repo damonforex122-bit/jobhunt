@@ -2,12 +2,12 @@ import sqlite3
 from pathlib import Path
 
 from .. import db
-from ..config import Settings
+from ..config import Settings, short_error
 from ..models import Fit
 from ..profile import load_resume_text
 from ..profile_store import get_master
 from ..tailor.master import MasterError, load_master
-from .gemini import grade
+from .gemini import _now, grade
 
 
 def grade_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=None) -> Fit:
@@ -18,11 +18,17 @@ def grade_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=
     if info:
         try:
             resume = load_master(conn, Path(info.path)).full_text()
-        except MasterError:  # unreadable upload: fall back to the proficiently resume
-            resume = load_resume_text(settings.proficiently_dir)
+        except MasterError as exc:  # never grade a different resume than the one uploaded
+            fit = Fit(job_id=job_id, keyword_score=0, graded_at=_now(), model=settings.gemini_model,
+                      error=f"Couldn't read your uploaded master resume: {short_error(exc)}")
+            return _record(conn, job, fit)
     else:
         resume = load_resume_text(settings.proficiently_dir)
-    fit = grade(job, resume, settings, client=client)
+    return _record(conn, job, grade(job, resume, settings, client=client))
+
+
+def _record(conn: sqlite3.Connection, job: dict, fit: Fit) -> Fit:
+    job_id = job["id"]
     old = db.get_fit(conn, job_id)
     if fit.llm_score is None and old is not None and old.llm_score is not None:
         # a failed grade must not wipe an existing score: keep it, surface the error

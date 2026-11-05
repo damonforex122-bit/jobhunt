@@ -416,3 +416,17 @@ def test_resume_panel_notes_older_master(settings, tmp_path):
                           "master_sha256": "0" * 64})
     conn.close()
     assert "Made from an older master" not in tc(webapp.create_app(s)).get("/jobs/1").text
+
+
+def test_resume_panel_notes_older_uploaded_master(settings, tmp_path):
+    from jobhunt import profile_store
+    s = _tailor_settings(settings, tmp_path)
+    up = tmp_path / "up.pdf"
+    up.write_bytes(b"%PDF uploaded master")
+    conn = db.connect(s.db_path)
+    profile_store.save_master(conn, profile_store.MasterInfo(
+        path=str(up), sha256="x", name="up.pdf", uploaded_at="2026-01-01"))
+    db.save_resume(conn, {"job_id": 1, "path": str(tmp_path / "out" / "r.pdf"),
+                          "master_sha256": "0" * 64})
+    conn.close()
+    assert "Made from an older master" in tc(webapp.create_app(s)).get("/jobs/1").text
