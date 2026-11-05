@@ -1,0 +1,158 @@
+"""`jobhunt daily`: the morning run. Import, scan, Gmail, interviews, grading; each step is logged."""
+import dataclasses
+import sqlite3
+from collections.abc import Callable
+
+from . import db
+from .config import Settings
+
+Step = tuple[str, Callable[[sqlite3.Connection, Settings], dict]]
+
+RECONNECT = "reconnect Gmail: run jobhunt gmail-auth"
+# run_import writes its own `runs` row, so daily must not write a second one for it.
+OWN_RUN_ROW = {"import"}
+
+
+class StepSkipped(Exception):
+    pass
+
+
+def _counts(report) -> dict:
+    if dataclasses.is_dataclass(report) and not isinstance(report, type):
+        return dataclasses.asdict(report)
+    if isinstance(report, dict):
+        return report
+    return {"result": report}
+
+
+def _step_import(conn, settings) -> dict:
+    from .importer import run_import
+
+    return _counts(run_import(conn, settings.proficiently_dir))
+
+
+def _step_scan(conn, settings) -> dict:
+    from .scan import run_scan
+
+    return _counts(run_scan(conn, settings))
+
+
+def _step_gmail(conn, settings) -> dict:
+    from .gmail.sync import run_sync
+
+    return _counts(run_sync(conn, settings))
+
+
+def _step_interviews(conn, settings) -> dict:
+    from .gmail.interviews import run_interview_sync
+
+    return {"synced": run_interview_sync(conn, settings)}
+
+
+def _step_grade(conn, settings) -> dict:
+    from . import fit
+
+    if not settings.gemini_api_key:
+        raise StepSkipped("no GEMINI_API_KEY")
+    graded = failed = 0
+    for job in db.list_jobs(conn, status="new"):
+        if db.get_fit(conn, job["id"]) is not None:
+            continue
+        try:
+            result = fit.grade_job(conn, job["id"], settings)
+        except Exception:  # one bad job must not stop the rest
+            failed += 1
+            continue
+        if result.error:
+            failed += 1
+        else:
+            graded += 1
+    return {"graded": graded, "failed": failed}
+
+
+def default_steps() -> list[Step]:
+    return [("import", _step_import), ("scan", _step_scan), ("gmail", _step_gmail),
+            ("interviews", _step_interviews), ("grade", _step_grade)]
+
+
+def _needs_reconnect(exc: Exception) -> bool:
+    from .gmail.auth import GmailNotConnected
+    from .tailor.providers import _status
+
+    return (isinstance(exc, GmailNotConnected) or "RefreshError" in type(exc).__name__
+            or _status(exc) == 401)
+
+
+def _error_text(exc: Exception, settings: Settings) -> str:
+    from .tailor.providers import _mask
+
+    if _needs_reconnect(exc):
+        return RECONNECT
+    text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    return _mask(text, settings)[:300]
+
+
+def run_daily(conn: sqlite3.Connection, settings: Settings,
+              steps: list[Step] | None = None) -> list[dict]:
+    results = []
+    for name, fn in steps if steps is not None else default_steps():
+        run_id = None if name in OWN_RUN_ROW else db.start_run(conn, name)
+        counts, error, status = None, None, "ok"
+        try:
+            counts = fn(conn, settings)
+        except StepSkipped as exc:
+            status, error = "skipped", f"skipped: {exc}"[:300]
+        except Exception as exc:
+            status, error = "failed", _error_text(exc, settings)
+        if run_id is not None:
+            db.finish_run(conn, run_id, counts=counts, error=error)
+        results.append({"step": name, "status": status, "counts": counts, "error": error})
+    return results
+
+
+def _fmt_counts(counts: dict | None) -> str:
+    if not counts:
+        return "done"
+    return ", ".join(f"{k} {v}" for k, v in counts.items())
+
+
+def _print_results(results: list[dict]) -> None:
+    for r in results:
+        if r["status"] == "ok":
+            print(f"✓ {r['step']}: {_fmt_counts(r['counts'])}")
+        elif r["status"] == "skipped":
+            print(f"– {r['step']}: {r['error']}")
+        else:
+            print(f"✗ {r['step']}: {r['error']}")
+
+
+def _print_status(conn: sqlite3.Connection) -> None:
+    runs = db.last_runs(conn)
+    if not runs:
+        print("No runs yet.")
+    for kind, run in sorted(runs.items()):
+        detail = run["error"] or (_fmt_counts(run["counts"]) if run["finished_at"] else "running")
+        print(f"{kind}: {run['started_at']}  {detail}")
+
+
+def register(sub) -> None:
+    p = sub.add_parser("daily", help="Morning run: import, scan, Gmail, interviews, grading")
+    p.add_argument("--status", action="store_true", help="Show the latest run of each kind")
+
+    def handler(args) -> int:
+        from .config import load_settings
+
+        settings = load_settings()
+        settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = db.connect(settings.db_path)
+        try:
+            if args.status:
+                _print_status(conn)
+                return 0
+            results = run_daily(conn, settings)
+        finally:
+            conn.close()
+        _print_results(results)
+        return 1 if any(r["status"] == "failed" for r in results) else 0
+
+    p.set_defaults(handler=handler)
