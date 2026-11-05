@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from master_layout import render_master_layout
 from pypdf import PdfReader
 from tailor_fakes import FakeGemini, sample_resume
 
@@ -22,7 +23,6 @@ from jobhunt.tailor.agents import (
     Verdicts,
 )
 from jobhunt.tailor.output import choose_path, company_folder, write_atomic
-from jobhunt.tailor.render import render_pdf
 
 MASTER = sample_resume()
 
@@ -59,7 +59,7 @@ def fake(raise_on=None, exc=None, matches=None) -> FakeGemini:
 @pytest.fixture
 def settings(tmp_path):
     master = tmp_path / "master.pdf"
-    render_pdf(MASTER, master)
+    render_master_layout(MASTER, master)
     return Settings(db_path=tmp_path / "t.db", proficiently_dir=tmp_path, master_resume_path=master,
                     resume_output_dir=tmp_path / "out", gemini_api_key="k")
 

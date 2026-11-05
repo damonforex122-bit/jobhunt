@@ -1,11 +1,11 @@
 import pytest
+from master_layout import render_master_layout as render_pdf
 from tailor_fakes import sample_resume
 
 from jobhunt import db
 from jobhunt.config import Settings
 from jobhunt.tailor import master
 from jobhunt.tailor.master import MasterError, load_master, parse_master, verify
-from jobhunt.tailor.render import render_pdf
 
 
 def _pdf_text(path) -> str:
