@@ -9,7 +9,7 @@
 <ul class="list-disc pl-5">{% for b in r.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
 </div>{% else %}<p>No roles found</p>{% endfor %}
 {% if s.skills %}<div><p class="font-semibold">Skills</p><ul class="list-disc pl-5">
-{% for k in s.skills %}<li>{{ k.name }}: {{ k["items"] | join(", ") }}</li>{% endfor %}</ul></div>{% endif %}
+{% for k in s.skills %}<li>{{ k.name }}: {% for it in k["items"] %}<span class="badge badge-outline">{{ it }}</span> {% endfor %}</li>{% endfor %}</ul></div>{% endif %}
 {% if s.education %}<div><p class="font-semibold">Education</p><ul class="list-disc pl-5">
 {% for e in s.education %}<li>{{ [e.school, e.detail, e.dates] | select | join(" — ") }}</li>{% endfor %}</ul></div>{% endif %}
 {% if s.publications %}<div><p class="font-semibold">Publications</p><ul class="list-disc pl-5">

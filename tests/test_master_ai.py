@@ -503,6 +503,35 @@ def test_last_bullet_moved_out_of_experience_is_rejected(tmp_path, where):
     assert verdict(moved, text)
 
 
+@pytest.mark.parametrize("n_bullets", [1, 12])
+@pytest.mark.parametrize("heading", [["Skills:"], ["Core Competencies"], ["Skills & Tools"], ["SKILLS"], []])
+def test_skills_after_experience_under_any_heading_are_accepted(tmp_path, heading, n_bullets):
+    bullets = [f"Delivered project number {i} with measurable impact across several teams." for i in range(n_bullets)]
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         *("- " + b for b in bullets), *heading, "Languages: Python, Go"]
+    text = lines_pdf(tmp_path / "k.pdf", g)
+    read = plain(experience=[role("Acme", bullets)], skills=[SkillRead(name="Languages", items=["Python", "Go"])])
+    assert verdict(read, text) == []
+
+
+def test_education_after_experience_under_a_colon_heading_is_accepted(tmp_path):
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         "- Built the first billing pipeline for the team.", "Education:", "State University",
+         "BS Computer Science", "2015 - 2019"]
+    text = lines_pdf(tmp_path / "e.pdf", g)
+    edu = [EducationRead(school="State University", detail="BS Computer Science", dates="2015 - 2019")]
+    assert verdict(plain(experience=[role("Acme", [g[6][2:]])], education=edu), text) == []
+
+
+def test_last_bullet_moved_to_publications_with_no_heading_after_is_rejected(tmp_path):
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         "- Built the first billing pipeline for the team.", "- Ran weekly incident reviews for the org."]
+    text = lines_pdf(tmp_path / "m.pdf", g)
+    first, last = g[6][2:], g[7][2:]
+    assert verdict(plain(experience=[role("Acme", [first, last])]), text) == []
+    assert verdict(plain(experience=[role("Acme", [first])], publications=[last]), text)
+
+
 def test_a_summary_never_sits_on_a_bullet_line(tmp_path):
     text = lines_pdf(tmp_path / "s.pdf", ["Pat Lee", "pat@example.com", "- Built the first billing pipeline for the team."])
     assert verdict(plain(summary="Built the first billing pipeline for the team."), text)
@@ -536,7 +565,7 @@ def test_preview_then_confirm_activates(web, settings, pdf):
     assert profile_store.get_master(conn) is None
     assert (mdir / f".pending-{sha}.pdf").is_file()
     page = web.get("/profile").text
-    for want in ("Sam Rivera", "Acme Corp", "Senior Engineer", BULLETS[0], BULLETS[1], "Languages", "Python, Go, SQL", "State University", "Check that every bullet sits under the right job", "Use this resume",
+    for want in ("Sam Rivera", "Acme Corp", "Senior Engineer", BULLETS[0], BULLETS[1], "Languages", '<span class="badge badge-outline">Go</span>', "State University", "Check that every bullet sits under the right job", "Use this resume",
                  "Try another file", "Save to PDF"):
         assert want in page
     assert "Use this resume" in web.get("/profile/master/preview").text
@@ -608,6 +637,19 @@ def test_preview_escapes_everything(web, settings, pdf, monkeypatch):
     for raw in ("<script>", "<img", "<b>x", "<u>", "<s>b", "<svg", "<i>i", "<q>", "<marquee"):
         assert raw not in page
     assert "&lt;script&gt;" in page
+
+
+def test_preview_shows_each_skill_item_as_its_own_badge(web, settings):
+    conn = conn_for(settings)
+    profile_store.save_pending_master(conn, profile_store.MasterInfo(
+        path="x", sha256="0" * 64, name="n", uploaded_at="t"),
+        {"name": "Pat", "contact": [], "summary": "", "roles": [], "education": [], "publications": [],
+         "skills": [{"name": "Languages", "items": ["Python, Go", "SQL"]}], "left_out": []})
+    conn.close()
+    page = web.get("/profile/master/preview").text
+    assert '<span class="badge badge-outline">Python, Go</span>' in page
+    assert '<span class="badge badge-outline">SQL</span>' in page
+    assert "Python, Go, SQL" not in page
 
 
 def test_confirm_without_a_pending_upload_is_harmless(web):

@@ -199,6 +199,34 @@ def _looks_like_header(text: str) -> bool:
     return len(t) <= HEADER_MAX and (bool(_DATE_RANGE.search(t)) or bool(_LONE_DATE.fullmatch(t.strip(" .,"))))
 
 
+_SMALL_WORDS = {"and", "of", "for", "the", "in", "to", "&", "/", "+"}
+
+
+def _looks_like_heading(line: str) -> bool:
+    """A short line set like a section heading: 'Skills:', 'CORE COMPETENCIES', 'Skills & Tools'."""
+    t = " ".join(line.split())
+    if not t or len(t) > 40 or t.endswith(".") or not any(c.isalpha() for c in t):
+        return False
+    words = [w for w in t.rstrip(":").split() if any(c.isalpha() for c in w) and w.lower() not in _SMALL_WORDS]
+    return t.endswith(":") or t.isupper() or all(next(c for c in w if c.isalpha()).isupper() for w in words)
+
+
+def _ends_experience(k, sec_lines, owners, line_text, is_heading) -> bool:
+    """Line k is where the experience section stops: a heading, a heading-looking line no experience
+    string covers, or the first line of another section's text. Not the last: a bullet line (the same
+    list carries on) or a section whose text runs on past an unclaimed heading (it started too early)."""
+    text = line_text(k)
+    if is_heading(text) or (2 not in owners.get(k, set()) and _looks_like_heading(text)):
+        return True
+    if _is_marker_line(text):
+        return False
+    for si, lines in sec_lines.items():
+        if si != 2 and min(lines) == k:
+            if not any(is_heading(line_text(h)) and not owners.get(h) for h in range(k + 1, max(lines) + 1)):
+                return True
+    return False
+
+
 def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading, n_lines) -> list[str]:
     """Checks that text sits with the section and role it came from (no moving of lines around)."""
     out: list[str] = []
@@ -227,8 +255,8 @@ def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading,
         if si == 0:
             continue
         top = max(lines)
-        if si == 2:  # experience runs on to the next section heading (or the end of the document)
-            while top + 1 < n_lines and not is_heading(line_text(top + 1)):
+        if si == 2:  # experience runs on until the next section visibly starts (or the end of the document)
+            while top + 1 < n_lines and not _ends_experience(top + 1, sec_lines, owners, line_text, is_heading):
                 top += 1
         for k in range(min(lines), top + 1):
             if owners.get(k, set()) - {si}:
@@ -354,8 +382,12 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
         return problems, []
 
     ignorable = [False] * len(hay)
-    for n in range(len(spans)):
-        if _is_heading(line_text(n)):
+    def heads_a_section(n: int) -> bool:  # an unread "Skills:" right above the skills it heads
+        nxt = owners.get(n + 1, set())
+        return not owners.get(n) and _looks_like_heading(line_text(n)) and bool(nxt) and 2 not in nxt
+
+    for n in range(len(spans)):  # headings are not content
+        if _is_heading(line_text(n)) or heads_a_section(n):
             for k in range(spans[n][0], spans[n][1]):
                 if not raw[k].isspace():
                     ignorable[bisect.bisect_left(orig, k)] = True
