@@ -160,8 +160,10 @@ def test_cli_status_prints_last_runs(conn, tmp_path, monkeypatch, capsys):
     db.finish_run(conn, rid, error="reconnect Gmail: run jobhunt gmail-auth")
     conn.commit()
     monkeypatch.setattr("jobhunt.config.load_settings", lambda: s)
+    monkeypatch.setattr("jobhunt.launchd.AGENTS_DIR", tmp_path / "agents")
     assert cli.main(["daily", "--status"]) == 0
     out = capsys.readouterr().out
+    assert "not scheduled" in out
     assert "scan" in out and "jobs_kept" in out and "12" in out
     assert "gmail" in out and "reconnect Gmail" in out
     assert "launchd" not in out

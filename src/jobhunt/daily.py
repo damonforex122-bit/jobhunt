@@ -1,6 +1,7 @@
 """`jobhunt daily`: the morning run. Import, scan, Gmail, interviews, grading; each step is logged."""
 import dataclasses
 import sqlite3
+import subprocess
 from collections.abc import Callable
 
 from . import db
@@ -155,19 +156,48 @@ def _print_status(conn: sqlite3.Connection) -> None:
         print(f"{kind}: {run['started_at']}  {detail}")
 
 
+def _print_schedule() -> None:
+    from . import launchd
+
+    when = (launchd.installed() or {}).get("StartCalendarInterval")
+    if isinstance(when, dict) and "Hour" in when:
+        print(f"Morning run: scheduled daily at {when['Hour']:02d}:{when.get('Minute', 0):02d}")
+    else:
+        print("Morning run: not scheduled — run `jobhunt daily --install`")
+
+
 def register(sub) -> None:
     p = sub.add_parser("daily", help="Morning run: import, scan, Gmail, interviews, grading")
     p.add_argument("--status", action="store_true", help="Show the latest run of each kind")
+    p.add_argument("--install", action="store_true", help="Schedule the morning run with launchd")
+    p.add_argument("--uninstall", action="store_true", help="Remove the scheduled morning run")
+    p.add_argument("--at", default="08:00", metavar="HH:MM", help="Time for --install (24-hour)")
 
     def handler(args) -> int:
+        from . import launchd
         from .config import load_settings
 
+        if args.install:
+            try:
+                path = launchd.install(args.at)
+            except (ValueError, RuntimeError, OSError) as exc:
+                print(f"Can't schedule: {exc}")
+                return 1
+            except subprocess.CalledProcessError as exc:
+                print(f"launchctl failed (exit {exc.returncode})")
+                return 1
+            print(f"Scheduled daily at {args.at} ({path})")
+            return 0
+        if args.uninstall:
+            print("Unscheduled." if launchd.uninstall() else "Nothing was scheduled.")
+            return 0
         settings = load_settings()
         settings.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = db.connect(settings.db_path)
         try:
             if args.status:
                 _print_status(conn)
+                _print_schedule()
                 return 0
             results = run_daily(conn, settings)
         finally:
