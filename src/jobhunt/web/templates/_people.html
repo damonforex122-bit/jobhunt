@@ -1,11 +1,11 @@
-<div id="people">
-<h2>People at {{ job.company }}</h2>
-{% if people_error %}<p class="err">{{ people_error }}</p>{% endif %}
-{% for src, reason in (skipped or {}).items() %}<p class="err">Skipped {{ src }}: {{ reason }}</p>{% endfor %}
-{% if people %}<table><tr><th>Name</th><th>Title</th><th>Source</th><th>Link</th></tr>
+<div id="people" class="space-y-2">
+<h2 class="text-xl font-semibold">People at {{ job.company }}</h2>
+{% if people_error %}<p class="text-error">{{ people_error }}</p>{% endif %}
+{% for src, reason in (skipped or {}).items() %}<p class="text-error">Skipped {{ src }}: {{ reason }}</p>{% endfor %}
+{% if people %}<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Name</th><th>Title</th><th>Source</th><th>Link</th></tr></thead><tbody>
 {% for p in people %}<tr><td>{{ p.name }}</td><td>{{ p.title or '' }}</td>
-<td><span class="badge">{{ p.source }}</span></td>
-<td><a href="{{ p.source_url|safe_url }}" rel="noopener noreferrer">source</a>{% if p.linkedin_url %} <a href="{{ p.linkedin_url|safe_url }}" rel="noopener noreferrer">LinkedIn</a>{% endif %}</td></tr>{% endfor %}</table>
+<td><span class="badge badge-outline">{{ p.source }}</span></td>
+<td><a class="link link-primary" href="{{ p.source_url|safe_url }}" rel="noopener noreferrer">source</a>{% if p.linkedin_url %} <a class="link link-primary" href="{{ p.linkedin_url|safe_url }}" rel="noopener noreferrer">LinkedIn</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
 {% else %}<p>No people found yet.</p>{% endif %}
-<button hx-post="/jobs/{{ job.id }}/people" hx-target="#people" hx-swap="outerHTML">Find people</button>
+<button class="btn btn-primary btn-sm" hx-post="/jobs/{{ job.id }}/people" hx-target="#people" hx-swap="outerHTML" hx-indicator="#people-busy">Find people <span id="people-busy" class="loading loading-spinner loading-xs htmx-indicator"></span></button>
 </div>

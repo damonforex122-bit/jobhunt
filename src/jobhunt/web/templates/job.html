@@ -1,21 +1,21 @@
 {% extends "base.html" %}{% block body %}
-<h1>{{ job.title }} <small>@ {{ job.company }}</small></h1>
-<p>{{ job.location or '' }} {% with flags=job.flags %}{% include "_flags.html" %}{% endwith %}
-{% if job.salary_min or job.salary_max %}<span class="badge">${{ job.salary_min or '?' }}&ndash;{{ job.salary_max or '?' }}</span>{% endif %}
-<a href="{{ job.url|safe_url }}" rel="noopener noreferrer">posting</a></p>
-<form method="post" action="/jobs/{{ job.id }}/status">
-  <select name="status">
+<h1 class="text-2xl font-bold">{{ job.title }} <small class="text-base font-normal opacity-70">@ {{ job.company }}</small></h1>
+<p class="flex flex-wrap items-center gap-2">{{ job.location or '' }} {% with flags=job.flags %}{% include "_flags.html" %}{% endwith %}
+{% if job.salary_min or job.salary_max %}<span class="badge badge-outline">${{ job.salary_min or '?' }}&ndash;{{ job.salary_max or '?' }}</span>{% endif %}
+<a class="link link-primary" href="{{ job.url|safe_url }}" rel="noopener noreferrer">posting</a></p>
+<form method="post" action="/jobs/{{ job.id }}/status" class="flex flex-wrap items-center gap-2">
+  <select name="status" class="select select-bordered">
   {% for group, items in [('Triage', triage), ('Pipeline', pipeline), ('Closed', closed)] %}<optgroup label="{{ group }}">
   {% for s in items %}<option value="{{ s }}" {{ 'selected' if s == job.status }}>{{ s }}</option>{% endfor %}</optgroup>{% endfor %}</select>
-  <input name="note" size="40" maxlength="1000" placeholder="Note (optional), e.g. Recruiter call Tue 2pm">
-  <button>Save</button>
+  <input name="note" size="40" maxlength="1000" placeholder="Note (optional), e.g. Recruiter call Tue 2pm" class="input input-bordered w-full max-w-md">
+  <button class="btn btn-primary">Save</button>
 </form>
-{% if events %}<h2>History</h2><ul class="history">
-{% for e in events|reverse %}<li><span class="muted">{{ e.at[:10] }}</span> <b>{{ e.status }}</b>{% if e.note %} &mdash; {{ e.note }}{% endif %}</li>{% endfor %}
+{% if events %}<h2 class="text-xl font-semibold">History</h2><ul class="history space-y-1">
+{% for e in events|reverse %}<li><span class="text-sm opacity-60">{{ e.at[:10] }}</span> <b>{{ e.status }}</b>{% if e.note %} &mdash; {{ e.note }}{% endif %}</li>{% endfor %}
 </ul>{% endif %}
 {% include "_fit.html" %}
 {% include "_resume.html" %}
 {% include "_people.html" %}
-<h2>Posting</h2>
-<div class="posting">{{ job.description or '(no description)' }}</div>
+<h2 class="text-xl font-semibold">Posting</h2>
+<div class="posting bg-base-200 rounded-box p-4">{{ job.description or '(no description)' }}</div>
 {% endblock %}

@@ -1,14 +1,14 @@
-<div id="resume">
-<h2>Tailored resume</h2>
-{% if resume and resume.error %}<p class="err">Not tailored: {{ resume.error }}</p>{% endif %}
+<div id="resume" class="space-y-2">
+<h2 class="text-xl font-semibold">Tailored resume</h2>
+{% if resume and resume.error %}<p class="text-error">Not tailored: {{ resume.error }}</p>{% endif %}
 {% if resume and resume.path %}
-<p><a href="/jobs/{{ job.id }}/resume.pdf" target="_blank" rel="noopener">Open PDF</a>
- &middot; <span class="muted">Saved in {{ output_dir }}</span></p>
-{% if resume.gaps %}<p><b>Gaps:</b></p><ul>{% for g in resume.gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
-{% if resume.fallbacks %}<p><b>Kept your original wording:</b></p><ul>{% for f in resume.fallbacks %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+<p><a class="link link-primary" href="/jobs/{{ job.id }}/resume.pdf" target="_blank" rel="noopener">Open PDF</a>
+ &middot; <span class="text-sm opacity-60">Saved in {{ output_dir }}</span></p>
+{% if resume.gaps %}<p><b>Gaps:</b></p><ul class="list-disc ml-6">{% for g in resume.gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+{% if resume.fallbacks %}<p><b>Kept your original wording:</b></p><ul class="list-disc ml-6">{% for f in resume.fallbacks %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 {% endif %}
-{% if not can_tailor %}<button disabled>Set a Gemini, Claude or OpenRouter key to tailor</button>
-{% elif not (job.description or '').strip() %}<button disabled>No posting text</button>
-{% else %}<button hx-post="/jobs/{{ job.id }}/resume" hx-target="#resume" hx-swap="outerHTML" hx-indicator="#resume-busy">Tailor resume</button>
-<span id="resume-busy" class="htmx-indicator muted">Tailoring… (about a minute)</span>{% endif %}
+{% if not can_tailor %}<button class="btn btn-sm" disabled>Set a Gemini, Claude or OpenRouter key to tailor</button>
+{% elif not (job.description or '').strip() %}<button class="btn btn-sm" disabled>No posting text</button>
+{% else %}<button class="btn btn-primary btn-sm" hx-post="/jobs/{{ job.id }}/resume" hx-target="#resume" hx-swap="outerHTML" hx-indicator="#resume-busy">Tailor resume</button>
+<span id="resume-busy" class="htmx-indicator text-sm opacity-60"><span class="loading loading-spinner loading-xs"></span> Tailoring… (about a minute)</span>{% endif %}
 </div>

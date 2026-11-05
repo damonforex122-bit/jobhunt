@@ -1,29 +1,28 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>jobhunt</title>
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>jobhunt</title>
 <meta name="color-scheme" content="light only">
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5.0.50/daisyui.css" rel="stylesheet" type="text/css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.11/dist/index.global.js"></script>
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 <style>
 :root{color-scheme:light only}
-html,body{background:#fff}
-body{font:14px system-ui,sans-serif;margin:0 auto;max-width:1100px;padding:1rem;color:#222}
-nav a{margin-right:1rem}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.35rem .5rem;border-bottom:1px solid #eee}
-.banner{background:#fff4d6;border:1px solid #e6c766;padding:.4rem .8rem;margin:.5rem 0}
-.flash{background:#e3f4e3;border:1px solid #8c8;padding:.4rem .8rem;margin:.5rem 0}
-.badge{display:inline-block;background:#eee;border-radius:3px;padding:0 .4rem;font-size:12px;margin-right:.2rem}
-.chip{display:inline-block;background:#e8eefc;border-radius:10px;padding:0 .5rem;margin:.1rem;font-size:12px}
-.err{color:#c00}.posting{white-space:pre-wrap;background:#fafafa;padding:.8rem;border:1px solid #eee}
-.pair{margin:.4rem 0}.pair .o{color:#888}
-.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem}
-.col{background:#f6f6f8;border-radius:6px;padding:.5rem;min-height:4rem}
-.col h3{margin:.2rem 0 .5rem;font-size:13px;text-transform:capitalize}
-.card{background:#fff;border:1px solid #e3e3e8;border-radius:5px;padding:.45rem .55rem;margin-bottom:.45rem}
-.card .co{font-weight:600}.muted{color:#888;font-size:12px}
-.history li{margin:.2rem 0}
-@media (max-width:760px){.board{grid-template-columns:1fr}}
-</style></head><body>
-<nav><a href="/">Jobs</a><a href="/pipeline">Pipeline</a><a href="/companies">Companies</a></nav>
-{% for b in banner %}<div class="banner">{{ b }}</div>{% endfor %}
-{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+.posting{white-space:pre-wrap}
+</style></head><body class="bg-base-100 text-base-content">
+<div class="navbar bg-base-200 shadow-sm">
+  <div class="flex-1"><a class="btn btn-ghost text-xl" href="/">jobhunt</a></div>
+  <ul class="menu menu-horizontal px-1">
+    <li><a href="/">Jobs</a></li>
+    <li><a href="/pipeline">Pipeline</a></li>
+    <li><a href="/interviews">Interviews</a></li>
+    <li><a href="/companies">Companies</a></li>
+    <li><a href="/profile">Profile</a></li>
+  </ul>
+</div>
+{% block wide %}
+<main class="max-w-6xl mx-auto p-4 space-y-3">
+{% for b in banner %}<div role="alert" class="alert alert-warning">{{ b }}</div>{% endfor %}
+{% if msg %}<div role="alert" class="alert alert-success">{{ msg }}</div>{% endif %}
 {% block body %}{% endblock %}
+</main>
+{% endblock %}
 </body></html>

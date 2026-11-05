@@ -377,5 +377,19 @@ def test_tailor_error_shown(settings, tmp_path):
 
     app.dependency_overrides[webapp.get_tailor] = lambda: fake
     r = tc(app).post("/jobs/1/resume")
-    assert '<p class="err">Not tailored: model said &lt;no&gt;</p>' in r.text
+    assert '<p class="text-error">Not tailored: model said &lt;no&gt;</p>' in r.text
     assert "Open PDF" not in r.text
+
+
+def test_base_uses_daisyui_light_theme(client):
+    import re
+    html = client.get("/").text
+    assert 'data-theme="light"' in html
+    assert 'content="light only"' in html
+    assert re.search(r"daisyui@5\.\d+\.\d+", html)
+    assert re.search(r"@tailwindcss/browser@4\.\d+\.\d+", html)
+
+
+def test_nav_links(client):
+    html = client.get("/").text
+    assert 'href="/interviews"' in html and 'href="/profile"' in html

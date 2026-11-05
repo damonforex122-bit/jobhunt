@@ -1,13 +1,13 @@
-<div id="fit">
-<h2>Fit</h2>
+<div id="fit" class="space-y-2">
+<h2 class="text-xl font-semibold">Fit</h2>
 {% if fit is none %}<p>Not graded yet.</p>
-{% elif fit.error %}<p class="err">Not graded: {{ fit.error }}</p><p>Keyword score: {{ fit.keyword_score }}</p>
+{% elif fit.error %}<p class="text-error">Not graded: {{ fit.error }}</p><p>Keyword score: {{ fit.keyword_score }}</p>
 {% else %}
-<p><b>Score {{ fit.llm_score }}/10</b> &middot; match {{ fit.match_pct }}% &middot; keyword {{ fit.keyword_score }}</p>
+<p><span class="badge badge-primary">Score {{ fit.llm_score }}/10</span> &middot; match {{ fit.match_pct }}% &middot; keyword {{ fit.keyword_score }}</p>
 {% if fit.reasons %}<p><b>Reasons:</b> {{ fit.reasons }}</p>{% endif %}
 {% if fit.gaps %}<p><b>Gaps:</b> {{ fit.gaps }}</p>{% endif %}
 {% endif %}
-{% if fit and fit.missing_keywords %}<p>Missing: {% for k in fit.missing_keywords %}<span class="chip">{{ k }}</span>{% endfor %}</p>{% endif %}
-{% if fit %}{% for b in fit.rewritten_bullets %}<div class="pair"><div class="o">{{ b.get('original') }}</div><div>&rarr; {{ b.get('rewritten') }}</div></div>{% endfor %}{% endif %}
-<button hx-post="/jobs/{{ job.id }}/fit" hx-target="#fit" hx-swap="outerHTML">Grade</button>
+{% if fit and fit.missing_keywords %}<p>Missing: {% for k in fit.missing_keywords %}<span class="badge badge-info badge-outline">{{ k }}</span> {% endfor %}</p>{% endif %}
+{% if fit %}{% for b in fit.rewritten_bullets %}<div class="my-2"><div class="opacity-60">{{ b.get('original') }}</div><div>&rarr; {{ b.get('rewritten') }}</div></div>{% endfor %}{% endif %}
+<button class="btn btn-primary btn-sm" hx-post="/jobs/{{ job.id }}/fit" hx-target="#fit" hx-swap="outerHTML" hx-indicator="#fit-busy">Grade <span id="fit-busy" class="loading loading-spinner loading-xs htmx-indicator"></span></button>
 </div>

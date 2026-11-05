@@ -1,18 +1,18 @@
 {% extends "base.html" %}{% block body %}
-<h1>Jobs</h1>
-<form method="get">
-  <select name="status"><option value="">any status</option>
+<h1 class="text-2xl font-bold">Jobs</h1>
+<form method="get" class="flex flex-wrap items-center gap-2">
+  <select name="status" class="select select-bordered"><option value="">any status</option>
   {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>{% endfor %}</select>
-  min score <input name="min_score" size="3" value="{{ min_score }}">
-  company <input name="company" value="{{ company }}">
-  <button>Filter</button>
+  <label class="flex items-center gap-1">min score <input name="min_score" size="3" value="{{ min_score }}" class="input input-bordered w-20"></label>
+  <label class="flex items-center gap-1">company <input name="company" value="{{ company }}" class="input input-bordered"></label>
+  <button class="btn btn-primary">Filter</button>
 </form>
-<table><tr><th>Company</th><th>Title</th><th>Location</th><th>Flags</th><th>LLM</th><th>Keyword %</th><th>Status</th><th>First seen</th></tr>
+<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Company</th><th>Title</th><th>Location</th><th>Flags</th><th>LLM</th><th>Keyword %</th><th>Status</th><th>First seen</th></tr></thead><tbody>
 {% for j in jobs %}<tr>
-<td>{{ j.company }}</td><td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
+<td>{{ j.company }}</td><td><a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
 <td>{% with flags=j.flags %}{% include "_flags.html" %}{% endwith %}</td>
-<td>{{ j.llm_score if j.llm_score is not none else '' }}{% if j.fit_error %} <span class="err" title="{{ j.fit_error }}">!</span>{% endif %}</td>
+<td>{% if j.llm_score is not none %}<span class="badge badge-primary">{{ j.llm_score }}</span>{% endif %}{% if j.fit_error %} <span class="text-error" title="{{ j.fit_error }}">!</span>{% endif %}</td>
 <td>{{ j.keyword_score if j.keyword_score is not none and j.fit_model != 'proficiently-import' else '' }}</td>
-<td>{{ j.status }}</td><td>{{ (j.first_seen or '')[:10] }}</td></tr>
+<td><span class="badge badge-outline">{{ j.status }}</span></td><td>{{ (j.first_seen or '')[:10] }}</td></tr>
 {% else %}<tr><td colspan="8">No jobs. Try <code>jobhunt import</code> or Scan on the Companies page.</td></tr>{% endfor %}
-</table>{% endblock %}
+</tbody></table></div>{% endblock %}

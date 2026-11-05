@@ -1,29 +1,31 @@
 {% extends "base.html" %}{% block body %}
-<h1>Pipeline</h1>
-<p class="muted">Move a job here by setting its status on the job page, or with <code>jobhunt status &lt;id&gt; applied</code>.</p>
-<h2>Suggested from Gmail</h2>
-<form method="post" action="/gmail/sync" style="display:inline"><button>Sync Gmail</button></form>
-{% if not gmail_connected %}<span class="muted">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
-{% if suggestions %}<table><tr><th>Email</th><th>Job</th><th>Move</th><th></th></tr>
-{% for s in suggestions %}<tr><td><span class="muted">{{ s.received }} &middot; {{ s.sender }}</span><br>{{ s.subject }}<br><span class="muted">{{ s.snippet }}</span></td>
-<td>{{ s.company }}<br>{% if s.job_id %}<a href="/jobs/{{ s.job_id }}">{{ s.title }}</a>{% else %}<span class="badge">new &mdash; Accept adds it to your pipeline</span>{% endif %}</td>
-<td>{{ s.current_status or 'not tracked' }} &rarr; <b>{{ s.suggested_status }}</b></td>
-<td><form method="post" action="/gmail/suggestions/{{ s.id }}/accept" style="display:inline"><button>Accept</button></form>
-<form method="post" action="/gmail/suggestions/{{ s.id }}/dismiss" style="display:inline"><button>Dismiss</button></form></td></tr>{% endfor %}
-</table>{% else %}<p class="muted">No suggestions right now.</p>{% endif %}
-<h2>Stages</h2>
-<div class="board">
-{% for stage in pipeline %}<div class="col"><h3>{{ stage }} ({{ board[stage]|length }})</h3>
-{% for j in board[stage] %}<div class="card"><div class="co">{{ j.company }}</div>
-<a href="/jobs/{{ j.id }}">{{ j.title }}</a>
-<div class="muted">in stage since {{ (j.stage_since or '')[:10] }}{% if j.applied_at and stage != 'applied' %} &middot; applied {{ j.applied_at[:10] }}{% endif %}{% if j.llm_score is not none %} &middot; fit {{ j.llm_score }}{% endif %}</div>
-{% if j.last_note %}<div>{{ j.last_note }}</div>{% endif %}</div>
-{% else %}<div class="muted">None yet</div>{% endfor %}</div>{% endfor %}
+<h1 class="text-2xl font-bold">Pipeline</h1>
+<p class="text-sm opacity-60">Move a job here by setting its status on the job page, or with <code>jobhunt status &lt;id&gt; applied</code>.</p>
+<h2 class="text-xl font-semibold">Suggested from Gmail</h2>
+<div class="flex items-center gap-2">
+<form method="post" action="/gmail/sync"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>
+{% if not gmail_connected %}<span class="text-sm opacity-60">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
 </div>
-<h2>Closed</h2>
-<p class="muted">{% for stage in closed %}{{ stage }} {{ board[stage]|length }}{{ " · " if not loop.last }}{% endfor %}</p>
-<table><tr><th>Outcome</th><th>Company</th><th>Title</th><th>Date</th><th>Note</th></tr>
-{% for stage in closed %}{% for j in board[stage] %}<tr><td>{{ stage }}</td><td>{{ j.company }}</td>
-<td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ (j.stage_since or '')[:10] }}</td><td>{{ j.last_note or '' }}</td></tr>{% endfor %}{% endfor %}
-{% if not (board.accepted or board.rejected or board.withdrawn) %}<tr><td colspan="5" class="muted">Nothing closed yet.</td></tr>{% endif %}
-</table>{% endblock %}
+{% if suggestions %}<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Email</th><th>Job</th><th>Move</th><th></th></tr></thead><tbody>
+{% for s in suggestions %}<tr><td><span class="text-sm opacity-60">{{ s.received }} &middot; {{ s.sender }}</span><br>{{ s.subject }}<br><span class="text-sm opacity-60">{{ s.snippet }}</span></td>
+<td>{{ s.company }}<br>{% if s.job_id %}<a class="link link-primary" href="/jobs/{{ s.job_id }}">{{ s.title }}</a>{% else %}<span class="badge badge-info">new &mdash; Accept adds it to your pipeline</span>{% endif %}</td>
+<td>{{ s.current_status or 'not tracked' }} &rarr; <b>{{ s.suggested_status }}</b></td>
+<td class="whitespace-nowrap"><form method="post" action="/gmail/suggestions/{{ s.id }}/accept" class="inline"><button class="btn btn-primary btn-sm">Accept</button></form>
+<form method="post" action="/gmail/suggestions/{{ s.id }}/dismiss" class="inline"><button class="btn btn-ghost btn-sm">Dismiss</button></form></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="text-sm opacity-60">No suggestions right now.</p>{% endif %}
+<h2 class="text-xl font-semibold">Stages</h2>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+{% for stage in pipeline %}<div class="card bg-base-200"><div class="card-body p-3 gap-2"><h3 class="font-semibold capitalize">{{ stage }} <span class="badge badge-neutral">{{ board[stage]|length }}</span></h3>
+{% for j in board[stage] %}<div class="card bg-base-100 shadow-sm"><div class="card-body p-3 gap-1"><div class="font-semibold">{{ j.company }}</div>
+<a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a>
+<div class="text-sm opacity-60">in stage since {{ (j.stage_since or '')[:10] }}{% if j.applied_at and stage != 'applied' %} &middot; applied {{ j.applied_at[:10] }}{% endif %}{% if j.llm_score is not none %} &middot; fit <span class="badge badge-primary badge-sm">{{ j.llm_score }}</span>{% endif %}</div>
+{% if j.last_note %}<div>{{ j.last_note }}</div>{% endif %}</div></div>
+{% else %}<div class="text-sm opacity-60">None yet</div>{% endfor %}</div></div>{% endfor %}
+</div>
+<h2 class="text-xl font-semibold">Closed</h2>
+<p class="text-sm opacity-60">{% for stage in closed %}{{ stage }} {{ board[stage]|length }}{{ " · " if not loop.last }}{% endfor %}</p>
+<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Outcome</th><th>Company</th><th>Title</th><th>Date</th><th>Note</th></tr></thead><tbody>
+{% for stage in closed %}{% for j in board[stage] %}<tr><td><span class="badge badge-outline">{{ stage }}</span></td><td>{{ j.company }}</td>
+<td><a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ (j.stage_since or '')[:10] }}</td><td>{{ j.last_note or '' }}</td></tr>{% endfor %}{% endfor %}
+{% if not (board.accepted or board.rejected or board.withdrawn) %}<tr><td colspan="5" class="opacity-60">Nothing closed yet.</td></tr>{% endif %}
+</tbody></table></div>{% endblock %}
