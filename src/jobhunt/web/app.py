@@ -1,26 +1,35 @@
 """Local web UI. One sqlite connection per request; routes reach the slow actions
 (grade, find people, scan, import) through small dependency functions so tests can override them."""
+import os
 import re
+import secrets
+from datetime import datetime, timezone
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote, urlsplit
 
 import yaml
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import db, importer, scan
-from ..config import Settings, short_error
+from .. import db, importer, profile_store, scan
+from ..config import KEY_FIELDS, Settings, reload_settings, short_error
+from ..envfile import mask, update_env
 from ..fit import grade_job
 from ..gmail import sync as gmail_sync
 from ..gmail.auth import GmailNotConnected
-from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE
+from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..tailor import tailor_job
+from ..tailor.master import MasterError, load_master_with_sha
 from ..tailor.providers import has_ai_key
+
+MAX_MASTER_BYTES = 10 * 1024 * 1024
+KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
+              "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa"}
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -243,5 +252,92 @@ def create_app(settings: Settings) -> FastAPI:
                                     status_code=303)
         msg = "Import done: " + ", ".join(f"{k} {v}" for k, v in r.items())
         return RedirectResponse(f"/companies?msg={quote(msg)}", status_code=303)
+
+    # --- profile ------------------------------------------------------------
+
+    def to_profile(msg: str) -> RedirectResponse:
+        return RedirectResponse(f"/profile?msg={quote(msg)}", status_code=303)
+
+    def csv(value: str) -> list[str]:
+        return [p.strip() for p in value.split(",") if p.strip()]
+
+    @app.get("/profile", response_class=HTMLResponse)
+    def profile_page(request: Request, conn: Conn):
+        keys = [dict(field=f, label=KEY_LABELS.get(f, f), masked=mask(getattr(settings, f)),
+                     shell=bool(os.environ.get(f.upper()))) for f in KEY_FIELDS]
+        return render(request, "profile.html",
+                      master=profile_store.get_master(conn),
+                      master_path=profile_store.effective_master_path(conn, settings),
+                      links=profile_store.get_links(conn),
+                      prefs=profile_store.effective_preferences(conn, settings), keys=keys)
+
+    @app.post("/profile/links")
+    def post_profile_links(conn: Conn, website: Annotated[str, Form()] = "",
+                           github: Annotated[str, Form()] = "",
+                           linkedin: Annotated[str, Form()] = ""):
+        profile_store.save_links(conn, profile_store.Links(
+            website=website.strip(), github=github.strip(), linkedin=linkedin.strip()))
+        return to_profile("Links saved.")
+
+    @app.post("/profile/preferences")
+    def post_profile_preferences(conn: Conn, target_roles: Annotated[str, Form()] = "",
+                                 search_terms: Annotated[str, Form()] = "",
+                                 excluded_terms: Annotated[str, Form()] = "",
+                                 locations: Annotated[str, Form()] = "",
+                                 salary_floor: Annotated[str, Form()] = "0"):
+        floor = salary_floor.strip().replace(",", "")
+        if not floor.isdigit():
+            return to_profile("Salary floor must be a whole number.")
+        profile_store.save_preferences(conn, Preferences(
+            target_roles=csv(target_roles), search_terms=csv(search_terms),
+            excluded_terms=csv(excluded_terms), locations=csv(locations),
+            salary_floor=int(floor)))
+        return to_profile("Preferences saved.")
+
+    @app.post("/profile/keys")
+    async def post_profile_keys(request: Request):
+        form = await request.form()
+        changes: dict[str, str | None] = {}
+        for f in KEY_FIELDS:
+            if form.get(f"remove_{f}"):
+                changes[f.upper()] = None
+            else:
+                value = form.get(f)
+                if isinstance(value, str) and value:
+                    changes[f.upper()] = value
+        if not changes:
+            return to_profile("No key changes.")
+        try:
+            update_env(settings.env_path, changes)
+        except ValueError:
+            return to_profile("That key contains characters that can't be saved")
+        reload_settings(settings)
+        return to_profile("Keys updated.")
+
+    @app.post("/profile/master")
+    def post_profile_master(conn: Conn, file: Annotated[UploadFile, File()]):
+        data = file.file.read(MAX_MASTER_BYTES + 1)
+        if len(data) > MAX_MASTER_BYTES:
+            return to_profile("That file is over 10 MB.")
+        if not data.startswith(b"%PDF-"):
+            return to_profile("That file isn't a PDF.")
+        target_dir = settings.db_path.parent / "master"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        tmp = target_dir / f".upload-{secrets.token_hex(8)}.tmp"
+        tmp.write_bytes(data)
+        try:
+            _, sha = load_master_with_sha(conn, tmp)
+        except MasterError as e:
+            tmp.unlink(missing_ok=True)
+            return to_profile(str(e))
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        dest = target_dir / f"{sha}.pdf"
+        os.replace(tmp, dest)
+        profile_store.save_master(conn, profile_store.MasterInfo(
+            path=str(dest), sha256=sha, name=Path(file.filename or "master.pdf").name[:200],
+            uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        return to_profile("Master resume saved.")
 
     return app

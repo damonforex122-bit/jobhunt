@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block body %}
+<h1 class="text-2xl font-bold">Profile</h1>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">Master resume</h2>
+{% if master %}<p>Active: <strong>{{ master.name }}</strong> <span class="text-sm opacity-70">uploaded {{ master.uploaded_at }}</span></p>
+{% else %}<p>Using the default file: <code>{{ master_path }}</code></p>{% endif %}
+<form method="post" action="/profile/master" enctype="multipart/form-data" class="flex flex-wrap gap-2 items-center">
+<input type="file" name="file" accept="application/pdf,.pdf" class="file-input file-input-bordered" required>
+<button class="btn btn-primary">Upload</button>
+</form>
+<p class="text-sm opacity-70">PDF in the master layout, up to 10 MB. It is checked before it replaces the current one.</p>
+</div></div>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">Links</h2>
+<form method="post" action="/profile/links" class="space-y-2">
+<label class="form-control"><span class="label-text">Website</span><input class="input input-bordered w-full" name="website" value="{{ links.website }}"></label>
+<label class="form-control"><span class="label-text">GitHub</span><input class="input input-bordered w-full" name="github" value="{{ links.github }}"></label>
+<label class="form-control"><span class="label-text">LinkedIn</span><input class="input input-bordered w-full" name="linkedin" value="{{ links.linkedin }}"></label>
+<button class="btn btn-primary">Save links</button>
+</form>
+</div></div>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">Job preferences</h2>
+<form method="post" action="/profile/preferences" class="space-y-2">
+<label class="form-control"><span class="label-text">Target roles (comma separated)</span><input class="input input-bordered w-full" name="target_roles" value="{{ prefs.target_roles | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Search terms</span><input class="input input-bordered w-full" name="search_terms" value="{{ prefs.search_terms | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Excluded terms</span><input class="input input-bordered w-full" name="excluded_terms" value="{{ prefs.excluded_terms | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Locations</span><input class="input input-bordered w-full" name="locations" value="{{ prefs.locations | join(', ') }}"></label>
+<label class="form-control"><span class="label-text">Salary floor</span><input class="input input-bordered w-full" name="salary_floor" inputmode="numeric" value="{{ prefs.salary_floor }}"></label>
+<button class="btn btn-primary">Save preferences</button>
+</form>
+</div></div>
+
+<div class="card bg-base-200 shadow-sm"><div class="card-body">
+<h2 class="card-title">API keys</h2>
+<p class="text-sm opacity-70">Saved to your local .env. Leave a field blank to keep the current key.</p>
+<form method="post" action="/profile/keys" autocomplete="off" class="space-y-3">
+{% for k in keys %}
+<div>
+<label class="form-control"><span class="label-text">{{ k.label }} {% if k.masked %}<code>{{ k.masked }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}</span>
+<input class="input input-bordered w-full" type="password" name="{{ k.field }}" placeholder="Paste a new key" autocomplete="new-password"></label>
+{% if k.shell %}<p class="text-sm text-warning">set in your shell; .env value ignored</p>{% endif %}
+{% if k.masked %}<label class="label cursor-pointer justify-start gap-2"><input type="checkbox" class="checkbox checkbox-sm" name="remove_{{ k.field }}"><span class="label-text">Remove</span></label>{% endif %}
+</div>
+{% endfor %}
+<button class="btn btn-primary">Save keys</button>
+</form>
+</div></div>
+{% endblock %}
