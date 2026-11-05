@@ -304,3 +304,77 @@ def test_pipeline_shows_new_company_suggestion(client, settings):
     conn.close()
     page = client.get("/pipeline").text
     assert "Hippocratic AI" in page and "not tracked" in page and "/jobs/None" not in page
+
+
+def _tailor_settings(settings, tmp_path, key="k"):
+    return settings.model_copy(update={"gemini_api_key": key,
+                                       "resume_output_dir": tmp_path / "out"})
+
+
+def test_tailor_button_calls_tailor_and_renders_panel(settings, tmp_path):
+    s = _tailor_settings(settings, tmp_path)
+    app = webapp.create_app(s)
+
+    def fake(conn, job_id, settings):
+        db.save_resume(conn, {"job_id": job_id, "path": str(tmp_path / "out" / "r.pdf"),
+                              "gaps": ["no Rust experience"], "fallbacks": ["Summary line"]})
+
+    app.dependency_overrides[webapp.get_tailor] = lambda: fake
+    r = tc(app).post("/jobs/1/resume")
+    assert r.status_code == 200
+    assert "Open PDF" in r.text and "/jobs/1/resume.pdf" in r.text
+    assert "no Rust experience" in r.text and "Kept your original wording" in r.text
+    assert "Summary line" in r.text and str(tmp_path / "out") in r.text
+
+
+def test_resume_pdf_route_serves_only_recorded_file(settings, tmp_path):
+    s = _tailor_settings(settings, tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    pdf = out / "r.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    outside = tmp_path / "secret.pdf"
+    outside.write_bytes(b"%PDF-1.4 secret")
+    conn = db.connect(s.db_path)
+    db.save_resume(conn, {"job_id": 1, "path": str(pdf)})
+    db.save_resume(conn, {"job_id": 2, "path": str(outside)})
+    conn.close()
+    c = tc(webapp.create_app(s))
+    r = c.get("/jobs/1/resume.pdf")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+    assert c.get("/jobs/2/resume.pdf").status_code == 404  # outside the output dir
+    assert c.get("/jobs/999/resume.pdf").status_code == 404  # no record
+    pdf.unlink()
+    assert c.get("/jobs/1/resume.pdf").status_code == 404  # file deleted
+
+
+def test_tailor_disabled_without_key(client):
+    html = client.get("/jobs/1").text
+    assert "Set GEMINI_API_KEY to tailor" in html and "disabled" in html
+    assert 'hx-post="/jobs/1/resume"' not in html
+
+
+def test_tailor_button_enabled_and_no_posting_text(settings, tmp_path):
+    s = _tailor_settings(settings, tmp_path)
+    conn = db.connect(s.db_path)
+    conn.execute("UPDATE jobs SET description = '' WHERE id = 2")
+    conn.commit()
+    conn.close()
+    c = tc(webapp.create_app(s))
+    ok = c.get("/jobs/1").text
+    assert 'hx-post="/jobs/1/resume"' in ok and "Tailoring" in ok
+    assert "No posting text" in c.get("/jobs/2").text
+
+
+def test_tailor_error_shown(settings, tmp_path):
+    s = _tailor_settings(settings, tmp_path)
+    app = webapp.create_app(s)
+
+    def fake(conn, job_id, settings):
+        db.save_resume(conn, {"job_id": job_id, "error": "model said <no>"})
+
+    app.dependency_overrides[webapp.get_tailor] = lambda: fake
+    r = tc(app).post("/jobs/1/resume")
+    assert '<p class="err">Not tailored: model said &lt;no&gt;</p>' in r.text
+    assert "Open PDF" not in r.text

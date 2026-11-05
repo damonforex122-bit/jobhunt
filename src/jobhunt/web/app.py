@@ -9,7 +9,7 @@ from urllib.parse import quote, urlsplit
 import yaml
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db, importer, scan
@@ -19,6 +19,7 @@ from ..gmail import sync as gmail_sync
 from ..gmail.auth import GmailNotConnected
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE
 from ..people.finder import find_people
+from ..tailor import tailor_job
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -36,6 +37,10 @@ TEMPLATES.env.filters["safe_url"] = safe_url
 
 def get_grader() -> Callable:
     return grade_job
+
+
+def get_tailor() -> Callable:
+    return tailor_job
 
 
 def get_finder() -> Callable:
@@ -110,7 +115,10 @@ def create_app(settings: Settings) -> FastAPI:
 
     def panel_ctx(conn, job: dict, **extra) -> dict:
         return dict(job=job, fit=db.get_fit(conn, job["id"]),
-                    people=db.list_people(conn, job["company"]), **extra)
+                    people=db.list_people(conn, job["company"]),
+                    resume=db.get_resume(conn, job["id"]),
+                    can_tailor=bool(settings.gemini_api_key), output_dir=settings.resume_output_dir,
+                    **extra)
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
@@ -136,6 +144,27 @@ def create_app(settings: Settings) -> FastAPI:
         job = job_or_404(conn, job_id)
         grader(conn, job_id, settings)
         return render(request, "_fit.html", **panel_ctx(conn, job))
+
+    @app.post("/jobs/{job_id}/resume", response_class=HTMLResponse)
+    def post_resume(request: Request, job_id: int, conn: Conn,
+                    tailor: Annotated[Callable, Depends(get_tailor)]):
+        job = job_or_404(conn, job_id)
+        tailor(conn, job_id, settings)  # records its own result or error; never raises
+        return render(request, "_resume.html", **panel_ctx(conn, job))
+
+    @app.get("/jobs/{job_id}/resume.pdf")
+    def get_resume_pdf(job_id: int, conn: Conn):
+        rec = db.get_resume(conn, job_id)
+        if rec is None or not rec.get("path"):
+            raise HTTPException(404, "no tailored resume")
+        path = Path(rec["path"])
+        try:
+            inside = path.resolve().is_relative_to(settings.resume_output_dir.resolve())
+        except OSError:
+            inside = False
+        if not inside or not path.is_file():
+            raise HTTPException(404, "no tailored resume")
+        return FileResponse(path, media_type="application/pdf", content_disposition_type="inline")
 
     @app.post("/jobs/{job_id}/people", response_class=HTMLResponse)
     def post_people(request: Request, job_id: int, conn: Conn,
