@@ -126,7 +126,7 @@ def _plain(runs: list[Run]) -> str:
     return " ".join("".join(r.text for r in runs).split())
 
 
-def _group_bullets(lines: list[_Line], margin: float) -> list[tuple[_Line, list[_Line]]]:
+def _group_bullets(lines: list[_Line]) -> list[tuple[_Line, list[_Line]]]:
     """Each bullet line with its hanging-indent continuation lines."""
     out: list[tuple[_Line, list[_Line]]] = []
     for ln in lines:
@@ -276,9 +276,9 @@ def parse_master(pdf: Path) -> Resume:
         if needed not in sections:
             raise MasterError(f"no {needed} section")
 
-    pubs = [_bullet_runs(b, c) for b, c in _group_bullets(sections.get("publications", []), margin)]
-    skills = [_skills(b, c, i) for i, (b, c) in enumerate(_group_bullets(sections.get("skills", []), margin))]
-    education = [_education(b, c) for b, c in _group_bullets(sections.get("education", []), margin)]
+    pubs = [_bullet_runs(b, c) for b, c in _group_bullets(sections.get("publications", []))]
+    skills = [_skills(b, c, i) for i, (b, c) in enumerate(_group_bullets(sections.get("skills", [])))]
+    education = [_education(b, c) for b, c in _group_bullets(sections.get("education", []))]
     return Resume(
         header=_header(header_lines, reader),
         summary=" ".join(ln.text for ln in sections["summary"]),
