@@ -122,26 +122,26 @@ def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
 
 def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
     root = Path(proficiently_dir)
-    history = root / "job-history.md"
-    if not root.is_dir():
-        raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
-    if not history.is_file():
-        raise ImportSourceError(f"job-history.md not found in {root}")
-    rows = parse_job_history(history.read_text())
-    extra = root / "_history-add.md"
-    if extra.is_file():
-        rows += parse_job_history(extra.read_text())
-    by_url: dict[str, ImportedJob] = {}
-    for item in rows:  # document order: a later row for the same URL wins
-        by_url[normalize_url(item.job.url)] = item
-    jobs_root = root / "jobs"
-    dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
-
     counts = {"jobs": 0, "new": 0, "updated": 0, "moved": 0, "unknown_status": 0,
               "companies": 0, "people": 0}
     companies: set[str] = set()
     run_id = start_run(conn, "import", str(root))
     try:
+        history = root / "job-history.md"
+        if not root.is_dir():
+            raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
+        if not history.is_file():
+            raise ImportSourceError(f"job-history.md not found in {root}")
+        rows = parse_job_history(history.read_text())
+        extra = root / "_history-add.md"
+        if extra.is_file():
+            rows += parse_job_history(extra.read_text())
+        by_url: dict[str, ImportedJob] = {}
+        for item in rows:  # document order: a later row for the same URL wins
+            by_url[normalize_url(item.job.url)] = item
+        jobs_root = root / "jobs"
+        dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
+
         for url, item in by_url.items():
             job = item.job
             ats = ats_from_url(job.url)

@@ -56,8 +56,9 @@ def _step_grade(conn, settings) -> dict:
         raise StepSkipped("no GEMINI_API_KEY")
     graded = failed = 0
     for job in db.list_jobs(conn, status="new"):
-        if db.get_fit(conn, job["id"]) is not None:
-            continue
+        old = db.get_fit(conn, job["id"])
+        if old is not None and old.llm_score is not None and not old.error:
+            continue  # a real grade; failed ones are retried
         try:
             result = fit.grade_job(conn, job["id"], settings)
         except Exception:  # one bad job must not stop the rest
@@ -84,12 +85,16 @@ def _needs_reconnect(exc: Exception) -> bool:
 
 
 def _error_text(exc: Exception, settings: Settings) -> str:
-    from .tailor.providers import _mask
+    from .config import KEY_FIELDS
 
     if _needs_reconnect(exc):
         return RECONNECT
     text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-    return _mask(text, settings)[:300]
+    for field in KEY_FIELDS:
+        key = getattr(settings, field, None)
+        if key:
+            text = text.replace(key, "***")
+    return text[:300]
 
 
 def run_daily(conn: sqlite3.Connection, settings: Settings,
@@ -103,10 +108,25 @@ def run_daily(conn: sqlite3.Connection, settings: Settings,
         except StepSkipped as exc:
             status, error = "skipped", f"skipped: {exc}"[:300]
         except Exception as exc:
-            status, error = "failed", _error_text(exc, settings)
+            status = "failed"
+            try:
+                error = _error_text(exc, settings)
+            except Exception:
+                error = type(exc).__name__
+        except BaseException:  # Ctrl-C / SystemExit: close the row, then let it propagate
+            if run_id is not None:
+                try:
+                    db.finish_run(conn, run_id, error="interrupted")
+                except Exception:
+                    pass
+            raise
+        result = {"step": name, "status": status, "counts": counts, "error": error}
         if run_id is not None:
-            db.finish_run(conn, run_id, counts=counts, error=error)
-        results.append({"step": name, "status": status, "counts": counts, "error": error})
+            try:
+                db.finish_run(conn, run_id, counts=counts, error=error)
+            except Exception as exc:  # a lost log line must not stop the morning run
+                result["log_error"] = f"{type(exc).__name__}: {exc}"[:300]
+        results.append(result)
     return results
 
 

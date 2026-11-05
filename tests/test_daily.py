@@ -1,5 +1,7 @@
 
 import httpx
+import sqlite3
+
 import pytest
 
 from jobhunt import cli, daily, db
@@ -123,7 +125,7 @@ def test_grade_step_grades_only_new_jobs_without_a_fit(conn, tmp_path, monkeypat
         db.upsert_job(conn, Job(company=f"C{i}", title="T", url=f"https://x.test/{i}",
                                 source="manual"))
     first, second, third = sorted(j["id"] for j in db.list_jobs(conn))
-    db.save_fit(conn, Fit(job_id=first, keyword_score=1, graded_at="2026-01-01"))
+    db.save_fit(conn, Fit(job_id=first, keyword_score=1, graded_at="2026-01-01", llm_score=8))
     called = []
 
     def fake(c, job_id, settings, client=None):
@@ -163,3 +165,87 @@ def test_cli_status_prints_last_runs(conn, tmp_path, monkeypatch, capsys):
     assert "scan" in out and "jobs_kept" in out and "12" in out
     assert "gmail" in out and "reconnect Gmail" in out
     assert "launchd" not in out
+
+
+def test_real_import_step_missing_dir_logs_one_failed_row_and_continues(conn, tmp_path):
+    s = _settings(tmp_path)  # proficiently_dir does not exist
+    ran = []
+    results = daily.run_daily(conn, s, [("import", dict(_REAL_STEPS())["import"]),
+                                        ("scan", lambda c, st: ran.append(1) or {})])
+    assert [r["status"] for r in results] == ["failed", "ok"]
+    rows = conn.execute("SELECT * FROM runs WHERE kind = 'import'").fetchall()
+    assert len(rows) == 1 and rows[0]["error"] and rows[0]["finished_at"]
+    assert ran == [1]
+
+
+def test_keyboard_interrupt_closes_the_row_and_propagates(conn, tmp_path):
+    def stop(c, s):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        daily.run_daily(conn, _settings(tmp_path), [("scan", stop)])
+    row = conn.execute("SELECT * FROM runs").fetchone()
+    assert row["finished_at"] and row["error"] == "interrupted"
+
+
+def test_error_text_failure_still_records_and_continues(conn, tmp_path, monkeypatch):
+    def boom(c, s):
+        raise RuntimeError("x")
+
+    def bad_text(exc, settings):
+        raise ValueError("masking broke")
+
+    monkeypatch.setattr(daily, "_error_text", bad_text)
+    results = daily.run_daily(conn, _settings(tmp_path), [("scan", boom), ("gmail", lambda c, s: {})])
+    assert [r["status"] for r in results] == ["failed", "ok"]
+    assert db.last_runs(conn)["scan"]["error"] == "RuntimeError"
+
+
+def test_finish_run_failure_does_not_stop_later_steps(conn, tmp_path, monkeypatch):
+    real = db.finish_run
+    calls = []
+
+    def flaky(c, run_id, counts=None, error=None):
+        calls.append(run_id)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("disk full")
+        return real(c, run_id, counts, error)
+
+    monkeypatch.setattr(db, "finish_run", flaky)
+    ok = lambda c, s: {"n": 1}  # noqa: E731
+    results = daily.run_daily(conn, _settings(tmp_path), [("scan", ok), ("gmail", ok)])
+    assert [r["step"] for r in results] == ["scan", "gmail"]
+    assert "disk full" in results[0]["log_error"]
+    assert results[1]["status"] == "ok"
+
+
+def test_error_text_masks_every_key_field(conn, tmp_path):
+    s = _settings(tmp_path, apollo_api_key="APOLLO-SECRET-1", exa_api_key="EXA-SECRET-2")
+
+    def boom(c, st):
+        raise RuntimeError("apollo APOLLO-SECRET-1 exa EXA-SECRET-2")
+
+    daily.run_daily(conn, s, [("scan", boom)])
+    err = db.last_runs(conn)["scan"]["error"]
+    assert "SECRET" not in err and err.count("***") == 2
+
+
+def test_grade_retries_failed_fits_but_skips_real_grades(conn, tmp_path, monkeypatch):
+    from jobhunt.models import Fit, Job
+
+    for i in range(4):
+        db.upsert_job(conn, Job(company=f"C{i}", title="T", url=f"https://x.test/{i}",
+                                source="manual"))
+    a, b, c, d = sorted(j["id"] for j in db.list_jobs(conn))
+    db.save_fit(conn, Fit(job_id=a, keyword_score=1, graded_at="2026-01-01", llm_score=9))
+    db.save_fit(conn, Fit(job_id=b, keyword_score=1, graded_at="2026-01-01", error="boom"))
+    db.save_fit(conn, Fit(job_id=c, keyword_score=1, graded_at="2026-01-01"))  # llm_score NULL
+    called = []
+
+    def fake(cn, job_id, settings, client=None):
+        called.append(job_id)
+        return Fit(job_id=job_id, keyword_score=1, graded_at="2026-01-01", llm_score=7)
+
+    monkeypatch.setattr("jobhunt.fit.grade_job", fake)
+    out = _grade_step()(conn, _settings(tmp_path, gemini_api_key="k"))
+    assert sorted(called) == sorted([b, c, d]) and out == {"graded": 3, "failed": 0}
