@@ -35,10 +35,11 @@ class Person(BaseModel):
     job_id: int | None = None
     name: str
     title: str | None = None
-    source: Literal["posting", "apollo", "exa"]
+    source: Literal["posting", "apollo", "exa", "proficiently"]
     source_url: str
     linkedin_url: str | None = None
     confidence: float
+    kind: str | None = None  # None = a found contact; "warm_intro" = from Proficiently
 
 
 class Fit(BaseModel):

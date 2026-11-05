@@ -124,7 +124,7 @@ def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
     return max(matches, key=lambda d: d.name) if matches else None  # latest date wins
 
 
-def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, int]:
+def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
     root = Path(proficiently_dir)
     history = root / "job-history.md"
     if not root.is_dir():
@@ -195,6 +195,11 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, in
                 upsert_person(conn, person.model_copy(update={"company": job.company, "job_id": job_id}))
                 counts["people"] += 1
         counts["companies"] = len(companies)
+        from .sources.proficiently_files import import_careers, import_digests, import_materials
+
+        counts["materials"] = import_materials(conn, root)
+        counts["careers"] = import_careers(conn, root)
+        counts["digests"] = import_digests(conn, root)
     except Exception as e:
         finish_run(conn, run_id, counts, error=str(e))
         raise

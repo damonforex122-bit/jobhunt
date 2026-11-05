@@ -312,19 +312,24 @@ def get_fit(conn: sqlite3.Connection, job_id: int) -> Fit | None:
 # --- people ----------------------------------------------------------------
 
 def upsert_person(conn: sqlite3.Connection, p: Person) -> int:
+    """Insert or update a contact. A found contact (kind NULL) never downgrades a warm intro."""
     conn.execute(
         """INSERT INTO people (company, job_id, name, title, source, source_url,
-               linkedin_url, confidence)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               linkedin_url, confidence, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(company, name) DO UPDATE SET
              job_id = COALESCE(excluded.job_id, job_id),
              title = COALESCE(excluded.title, title),
-             source = excluded.source,
-             source_url = excluded.source_url,
+             source = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                           THEN source ELSE excluded.source END,
+             source_url = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                               THEN source_url ELSE excluded.source_url END,
              linkedin_url = COALESCE(excluded.linkedin_url, linkedin_url),
-             confidence = excluded.confidence""",
+             confidence = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                               THEN confidence ELSE excluded.confidence END,
+             kind = COALESCE(excluded.kind, kind)""",
         (p.company, p.job_id, p.name, p.title, p.source, p.source_url,
-         p.linkedin_url, p.confidence),
+         p.linkedin_url, p.confidence, p.kind),
     )
     conn.commit()
     return conn.execute(
