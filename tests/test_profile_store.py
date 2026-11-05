@@ -97,8 +97,8 @@ import pytest
 
 
 @pytest.mark.parametrize("key,value", [
-    ("EXA_API_KEY", "k APOLLO_API_KEY=evil"),
-    ("EXA_API_KEY", "k x"),
+    ("EXA_API_KEY", "k\u2028APOLLO_API_KEY=evil"),
+    ("EXA_API_KEY", "k\u2029x"),
     ("EXA_API_KEY", "k\x85x"),
     ("EXA_API_KEY", "k\x0bAPOLLO_API_KEY=evil"),
     ("EXA_API_KEY", "k\x1cx"),
@@ -107,6 +107,7 @@ import pytest
     ("EXA_API_KEY", " lead"),
     ("EXA_API_KEY", "trail "),
     ("A=B", "x"),
+    ("EXA_API_KEY\n", "x"),
     ("lower", "x"),
 ])
 def test_update_env_rejects_unsafe_and_leaves_file_unchanged(tmp_path, key, value):

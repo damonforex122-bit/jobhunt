@@ -3,12 +3,12 @@ import os
 import re
 from pathlib import Path
 
-_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 _LINE_SEPARATORS = "\x7f\x85\u2028\u2029"
 
 
 def _check(key: str, value: str | None) -> None:
-    if not _KEY_RE.match(key):
+    if not _KEY_RE.fullmatch(key):
         raise ValueError("invalid env key")
     if value is None:
         return
