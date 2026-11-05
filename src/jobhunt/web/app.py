@@ -26,6 +26,7 @@ from ..people.finder import find_people
 from ..tailor import tailor_job
 from ..tailor.master import MasterError, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
+from . import review
 
 MAX_MASTER_BYTES = 10 * 1024 * 1024
 KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
@@ -148,7 +149,8 @@ def create_app(settings: Settings) -> FastAPI:
             company=company or None,
         )
         return render(request, "jobs.html", jobs=jobs, statuses=STATUSES, status=status,
-                      min_score=min_score, company=company)
+                      min_score=min_score, company=company,
+                      final_ids=db.final_job_ids(conn))
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: int, conn: Conn):
@@ -348,4 +350,5 @@ def create_app(settings: Settings) -> FastAPI:
             uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
         return to_profile("Master resume saved.")
 
+    review.register(app, settings, Conn, render, job_or_404)
     return app

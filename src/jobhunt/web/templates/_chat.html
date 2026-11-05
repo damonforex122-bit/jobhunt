@@ -1,0 +1,12 @@
+<div id="chat-log" class="space-y-2"
+ {% if running %}hx-get="/jobs/{{ job_id }}/review/chat?poll=1" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{% for m in chat %}
+<div class="chat {{ 'chat-end' if m.role == 'user' else 'chat-start' }}"><div class="chat-bubble {{ 'chat-bubble-primary' if m.role == 'user' else '' }}">{{ m.text }}</div></div>
+{% endfor %}
+{% if running %}
+<div class="chat chat-end"><div class="chat-bubble chat-bubble-primary">{{ running.instruction }}</div></div>
+<div class="text-sm opacity-60 space-y-1">{% for p in running.progress %}<div>{{ p }}</div>{% endfor %}
+<div><span class="loading loading-spinner loading-xs"></span> Working…</div></div>
+{% endif %}
+{% if extra_app_line %}<div class="chat chat-start"><div class="chat-bubble">{{ extra_app_line }}</div></div>{% endif %}
+</div>

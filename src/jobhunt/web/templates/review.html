@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block wide %}
+<main class="p-4 space-y-3">
+{% for b in banner %}<div role="alert" class="alert alert-warning">{{ b }}</div>{% endfor %}
+{% if msg %}<div role="alert" class="alert alert-success">{{ msg }}</div>{% endif %}
+{% include "_review_header.html" %}
+<div class="flex gap-3" style="height:75vh">
+  <section id="chat-panel" class="w-1/3 flex flex-col border border-base-300 rounded p-2">
+    <div class="flex-1 overflow-y-auto">{% include "_chat.html" %}</div>
+    <form class="flex gap-2 pt-2" hx-post="/jobs/{{ job.id }}/review/messages" hx-target="#chat-log" hx-swap="outerHTML"
+          hx-on::after-request="this.reset()">
+      <input name="text" class="input input-bordered flex-1" placeholder="Ask for a change…" autocomplete="off" required>
+      <button class="btn btn-primary">Send</button>
+    </form>
+  </section>
+  <section id="resume-panel" class="flex-1 border border-base-300 rounded">
+    {% if has_pdf %}<iframe id="resume-frame" class="w-full h-full" title="Tailored resume" src="/jobs/{{ job.id }}/resume.pdf?v={{ version }}"></iframe>
+    {% else %}<div class="h-full flex flex-col items-center justify-center gap-3">
+      <p class="opacity-60">No tailored resume yet.</p>
+      <button class="btn btn-primary" hx-post="/jobs/{{ job.id }}/review/messages" hx-vals='{"text": "Tailor this resume"}' hx-target="#chat-log" hx-swap="outerHTML">Tailor now</button>
+    </div>{% endif %}
+  </section>
+  <section id="posting-panel" class="w-1/3 border border-base-300 rounded p-2 overflow-y-auto">
+    <pre class="posting text-sm">{{ job.description or 'No posting text.' }}</pre>
+  </section>
+</div>
+<button id="posting-toggle" type="button" class="btn btn-sm">Show posting</button>
+</main>
+<script>
+(function () {
+  var panel = document.getElementById('posting-panel');
+  var btn = document.getElementById('posting-toggle');
+  var KEY = 'jobhunt.review.posting';
+  function apply(open) {
+    panel.style.display = open ? '' : 'none';
+    btn.textContent = open ? 'Hide posting' : 'Show posting';
+  }
+  var open = true;
+  try { open = localStorage.getItem(KEY) !== 'closed'; } catch (e) {}
+  apply(open);
+  btn.addEventListener('click', function () {
+    open = !open; apply(open);
+    try { localStorage.setItem(KEY, open ? 'open' : 'closed'); } catch (e) {}
+  });
+  document.body.addEventListener('resume-updated', function () {
+    var f = document.getElementById('resume-frame');
+    if (!f) { location.reload(); return; }
+    f.src = '/jobs/{{ job.id }}/resume.pdf?v=' + Date.now();
+    htmx.ajax('GET', '/jobs/{{ job.id }}/review/header', {target: '#review-header', swap: 'outerHTML'});
+  });
+})();
+</script>
+{% endblock %}

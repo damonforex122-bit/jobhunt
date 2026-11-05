@@ -9,7 +9,7 @@
 </form>
 <div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>Company</th><th>Title</th><th>Location</th><th>Flags</th><th>LLM</th><th>Keyword %</th><th>Status</th><th>First seen</th></tr></thead><tbody>
 {% for j in jobs %}<tr>
-<td>{{ j.company }}</td><td><a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
+<td>{{ j.company }}{% if j.id in final_ids %} <span class="badge badge-success badge-sm">Final ✓</span>{% endif %}</td><td><a class="link link-primary" href="/jobs/{{ j.id }}">{{ j.title }}</a></td><td>{{ j.location or '' }}</td>
 <td>{% with flags=j.flags %}{% include "_flags.html" %}{% endwith %}</td>
 <td>{% if j.llm_score is not none %}<span class="badge badge-primary">{{ j.llm_score }}</span>{% endif %}{% if j.fit_error %} <span class="text-error" title="{{ j.fit_error }}">!</span>{% endif %}</td>
 <td>{{ j.keyword_score if j.keyword_score is not none and j.fit_model != 'proficiently-import' else '' }}</td>

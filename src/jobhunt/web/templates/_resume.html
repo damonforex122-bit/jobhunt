@@ -3,6 +3,7 @@
 {% if resume and resume.error %}<p class="text-error">Not tailored: {{ resume.error }}</p>{% endif %}
 {% if resume and resume.path %}
 <p><a class="link link-primary" href="/jobs/{{ job.id }}/resume.pdf" target="_blank" rel="noopener">Open PDF</a>
+ &middot; <a class="link link-primary" href="/jobs/{{ job.id }}/review">Review &amp; refine</a>{% if resume.final_at %} <span class="badge badge-success badge-sm">Final ✓</span>{% endif %}
  &middot; <span class="text-sm opacity-60">Saved in {{ output_dir }}</span></p>
 {% if stale %}<p class="text-sm text-warning">Made from an older master. Tailor again to use your current one.</p>{% endif %}
 {% if resume.gaps %}<p><b>Gaps:</b></p><ul class="list-disc ml-6">{% for g in resume.gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
