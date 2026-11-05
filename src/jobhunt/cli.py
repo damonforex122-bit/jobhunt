@@ -73,3 +73,51 @@ REGISTRARS.append(gmail_sync.register)
 from . import tailor  # noqa: E402
 
 REGISTRARS.append(tailor.register)
+
+
+def _register_add(sub) -> None:
+    p = sub.add_parser("add", help="Add a job from a link and tailor your resume to it")
+    p.add_argument("url")
+    p.add_argument("--text-file", help="posting text to use when the page can't be read")
+
+    def handler(args) -> int:
+        from pathlib import Path
+
+        from . import db
+        from .config import load_settings
+        from .sources import by_link
+        from .tailor import tailor_job
+
+        settings = load_settings()
+        text = None
+        if args.text_file:
+            try:
+                text = Path(args.text_file).read_text()
+            except (OSError, UnicodeDecodeError) as exc:
+                print(f"Couldn't read {args.text_file}: {exc}")
+                return 1
+        conn = db.connect(settings.db_path)
+        try:
+            try:
+                job_id, created = by_link.add_job(conn, args.url, settings, text=text)
+            except by_link.LinkError as exc:
+                print(exc)
+                if exc.needs_text:
+                    print("Save the posting text to a file and rerun with --text-file FILE.")
+                return 1
+            job = db.get_job(conn, job_id)
+            label = "Added job" if created else "Already tracked: job"
+            print(f"{label} {job_id}: {job['company']} — {job['title']}")
+            result = tailor_job(conn, job_id, settings, progress=lambda msg: print(msg, flush=True))
+        finally:
+            conn.close()
+        if result.error:
+            print(f"Not tailored: {result.error}")
+            return 1
+        print(f"Saved: {result.path}")
+        return 0
+
+    p.set_defaults(handler=handler)
+
+
+REGISTRARS.append(_register_add)

@@ -75,38 +75,13 @@ def register(app: FastAPI, settings: Settings, Conn, render: Callable, job_or_40
             resp.headers["HX-Trigger"] = "resume-updated"
         return resp
 
-    @app.get("/jobs/{job_id}/review", response_class=HTMLResponse)
-    def review_page(request: Request, job_id: int, conn: Conn):
-        job = job_or_404(conn, job_id)
-        resume = db.get_resume(conn, job_id)
-        return render(request, "review.html", **header_ctx(conn, job),
-                      **chat_ctx(request, conn, job_id),
-                      version=(resume or {}).get("created_at") or "")
-
-    @app.get("/jobs/{job_id}/review/header", response_class=HTMLResponse)
-    def review_header(request: Request, job_id: int, conn: Conn):
-        return render(request, "_review_header.html", **header_ctx(conn, job_or_404(conn, job_id)))
-
-    @app.get("/jobs/{job_id}/review/chat", response_class=HTMLResponse)
-    def review_chat(request: Request, job_id: int, conn: Conn, poll: str = ""):
-        job_or_404(conn, job_id)
-        # The poller's last request (run just finished) tells the page to refresh the PDF.
-        finished = bool(poll) and snapshot(job_id) is None
-        return chat_response(request, conn, job_id, trigger=finished)
-
-    @app.post("/jobs/{job_id}/review/messages", response_class=HTMLResponse)
-    def review_send(request: Request, job_id: int, conn: Conn, text: Annotated[str, Form()],
-                    runner: Runner, reviser: Reviser, tailor: Tailorer):
-        job_or_404(conn, job_id)
-        text = text.strip()[:4000]
-        if not text:
-            return chat_response(request, conn, job_id)
+    def launch(conn, job_id: int, text: str, runner: Callable, reviser: Callable,
+               tailor: Callable) -> bool:
+        """Start a tailor/revise run in the background; False when one is already running."""
         with _LOCK:
-            busy = job_id in RUNNING
-            if not busy:
-                RUNNING[job_id] = {"instruction": text, "progress": []}
-        if busy:
-            return chat_response(request, conn, job_id, extra_app_line=BUSY_REPLY)
+            if job_id in RUNNING:
+                return False
+            RUNNING[job_id] = {"instruction": text, "progress": []}
         first = not (db.get_resume(conn, job_id) or {}).get("path")
 
         def progress(line: str) -> None:
@@ -137,6 +112,39 @@ def register(app: FastAPI, settings: Settings, Conn, render: Callable, job_or_40
                     bg.close()
 
         runner(work)
+        return True
+
+    @app.get("/jobs/{job_id}/review", response_class=HTMLResponse)
+    def review_page(request: Request, job_id: int, conn: Conn, runner: Runner, reviser: Reviser,
+                    tailor: Tailorer, start: str = ""):
+        job = job_or_404(conn, job_id)
+        if start and not (db.get_resume(conn, job_id) or {}).get("path"):
+            launch(conn, job_id, TAILOR_FIRST, runner, reviser, tailor)  # no-op if already running
+        resume = db.get_resume(conn, job_id)
+        return render(request, "review.html", **header_ctx(conn, job),
+                      **chat_ctx(request, conn, job_id),
+                      version=(resume or {}).get("created_at") or "")
+
+    @app.get("/jobs/{job_id}/review/header", response_class=HTMLResponse)
+    def review_header(request: Request, job_id: int, conn: Conn):
+        return render(request, "_review_header.html", **header_ctx(conn, job_or_404(conn, job_id)))
+
+    @app.get("/jobs/{job_id}/review/chat", response_class=HTMLResponse)
+    def review_chat(request: Request, job_id: int, conn: Conn, poll: str = ""):
+        job_or_404(conn, job_id)
+        # The poller's last request (run just finished) tells the page to refresh the PDF.
+        finished = bool(poll) and snapshot(job_id) is None
+        return chat_response(request, conn, job_id, trigger=finished)
+
+    @app.post("/jobs/{job_id}/review/messages", response_class=HTMLResponse)
+    def review_send(request: Request, job_id: int, conn: Conn, text: Annotated[str, Form()],
+                    runner: Runner, reviser: Reviser, tailor: Tailorer):
+        job_or_404(conn, job_id)
+        text = text.strip()[:4000]
+        if not text:
+            return chat_response(request, conn, job_id)
+        if not launch(conn, job_id, text, runner, reviser, tailor):
+            return chat_response(request, conn, job_id, extra_app_line=BUSY_REPLY)
         # With an inline runner the run is already over; tell the page to refresh the PDF.
         return chat_response(request, conn, job_id, trigger=snapshot(job_id) is None)
 

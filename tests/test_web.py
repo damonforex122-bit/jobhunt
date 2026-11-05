@@ -452,3 +452,100 @@ def test_gmail_sync_reports_interviews_updated(settings):
     app.dependency_overrides[webapp.get_gmail_sync] = lambda: lambda conn, s: SyncReport(1, 0)
     app.dependency_overrides[webapp.get_interview_sync] = lambda: lambda conn, s: 3
     assert "3 interviews updated" in tc(app).post("/gmail/sync").text
+
+
+# --- add a job by link ---------------------------------------------------------
+
+def _link_app(settings, adder=None, tailored=None):
+    import httpx
+    from tailor_fakes import FakeGemini
+
+    from jobhunt.sources import by_link
+    from jobhunt.tailor import TailorResult
+    from jobhunt.web import review
+
+    review.RUNNING.clear()
+    desc = ("We are hiring an engineer to build evaluation pipelines for language models and ship "
+            "dashboards weekly, working with researchers on datasets and Python services every day.")
+    fake = FakeGemini({by_link.ExtractedPosting: by_link.ExtractedPosting(
+        company="Example Co", title="Evals Engineer", description=desc)})
+
+    def handler(req):
+        if req.url.host == "boards-api.greenhouse.io":
+            return httpx.Response(200, json={"title": "AI Eng", "company_name": "Dscout",
+                                             "content": "&lt;p&gt;Do things&lt;/p&gt;"})
+        return httpx.Response(200, text="<html><body>Sign in to continue</body></html>")
+
+    def add(conn, url, settings, text=None):
+        return by_link.add_job_by_link(conn, url, settings, text=text, client=fake,
+                                       http=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    def fake_tailor(conn, job_id, settings, progress=None):
+        (tailored if tailored is not None else []).append(job_id)
+        db.save_resume(conn, {"job_id": job_id, "path": "x.pdf"})
+        return TailorResult(job_id=job_id, path="x.pdf")
+
+    app = webapp.create_app(settings)
+    app.dependency_overrides[webapp.get_link_adder] = lambda: adder or add
+    app.dependency_overrides[review.get_runner] = lambda: (lambda fn: fn())
+    app.dependency_overrides[review.get_review_tailor] = lambda: fake_tailor
+    return tc(app), desc
+
+
+def test_jobs_page_has_add_form(client):
+    html = client.get("/").text
+    assert 'action="/jobs/add"' in html and "Add a job by link" in html
+    assert "Paste the posting text" not in html
+
+
+def test_web_add_redirects_to_review_and_starts_tailoring(settings, monkeypatch):
+    monkeypatch.setattr("jobhunt.sources.by_link._resolve", lambda h: ["93.184.216.34"])
+    tailored = []
+    c, _ = _link_app(settings, tailored=tailored)
+    r = c.post("/jobs/add", data={"url": "https://job-boards.greenhouse.io/dscout/jobs/4472409009"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.endswith("/review?start=1")
+    page = c.get(loc)
+    assert page.status_code == 200 and tailored == [int(loc.split("/")[2])]
+    assert "Tailored your resume." in page.text and "Tailor this resume" in page.text
+    c.get(loc)  # reloading with a resume in place doesn't tailor again
+    assert len(tailored) == 1
+    assert "Dscout" in c.get("/").text
+
+
+def test_review_start_skips_a_running_job(settings):
+    from jobhunt.web import review
+    c, _ = _link_app(settings)
+    review.RUNNING[1] = {"instruction": "x", "progress": []}
+    try:
+        assert c.get("/jobs/1/review?start=1").status_code == 200
+    finally:
+        review.RUNNING.clear()
+
+
+def test_web_add_needs_text_shows_textarea_then_accepts_text(settings, monkeypatch):
+    monkeypatch.setattr("jobhunt.sources.by_link._resolve", lambda h: ["93.184.216.34"])
+    c, desc = _link_app(settings)
+    url = "https://careers.example.test/jobs/7"
+    r = c.post("/jobs/add", data={"url": url}, follow_redirects=False)
+    assert r.status_code == 200
+    assert "Paste the posting text" in r.text and f'value="{url}"' in r.text
+    r = c.post("/jobs/add", data={"url": url, "text": desc}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("/review?start=1")
+
+
+def test_web_add_other_errors_redirect_with_msg(settings):
+    c, _ = _link_app(settings)
+    r = c.post("/jobs/add", data={"url": "http://127.0.0.1:8000/"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/?msg=")
+    assert "private network" in c.get(r.headers["location"]).text
+
+
+def test_add_post_rejects_cross_site(settings):
+    c, _ = _link_app(settings)
+    for headers in ({"origin": "https://evil.example"}, {"sec-fetch-site": "cross-site"}):
+        r = c.post("/jobs/add", data={"url": "https://job-boards.greenhouse.io/a/jobs/1"},
+                   headers=headers, follow_redirects=False)
+        assert r.status_code == 403

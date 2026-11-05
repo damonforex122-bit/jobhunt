@@ -1,5 +1,17 @@
 {% extends "base.html" %}{% block body %}
 <h1 class="text-2xl font-bold">Jobs</h1>
+<form method="post" action="/jobs/add" id="add-by-link" class="flex flex-col gap-2 max-w-3xl">
+  <label class="font-semibold" for="add-url">Add a job by link</label>
+  {% if add_error %}<div role="alert" class="alert alert-warning">{{ add_error }}</div>{% endif %}
+  <div class="flex gap-2">
+    <input id="add-url" name="url" type="url" required placeholder="https://…" value="{{ add_url }}" class="input input-bordered flex-1">
+    <button class="btn btn-primary">Add and tailor</button>
+  </div>
+  {% if add_needs_text %}
+  <label class="font-semibold" for="add-text">Paste the posting text</label>
+  <textarea id="add-text" name="text" rows="8" required class="textarea textarea-bordered w-full" placeholder="Paste the job description here"></textarea>
+  {% endif %}
+</form>
 <form method="get" class="flex flex-wrap items-center gap-2">
   <select name="status" class="select select-bordered"><option value="">any status</option>
   {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>{% endfor %}</select>

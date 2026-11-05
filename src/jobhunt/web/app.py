@@ -25,6 +25,7 @@ from ..gmail.auth import GmailNotConnected
 from ..gmail.invites import local_tz
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
+from ..sources import by_link
 from ..tailor import tailor_job
 from ..tailor.master import MasterError, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
@@ -79,6 +80,10 @@ def get_scanner() -> Callable:
 
 def get_importer() -> Callable:
     return importer.run_import
+
+
+def get_link_adder() -> Callable:
+    return by_link.add_job_by_link
 
 
 def get_gmail_sync() -> Callable:
@@ -162,9 +167,8 @@ def create_app(settings: Settings) -> FastAPI:
                     can_tailor=has_ai_key(settings), output_dir=settings.resume_output_dir,
                     **extra)
 
-    @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
-              company: str = ""):
+    def jobs_page(request: Request, conn, status: str = "", min_score: str = "",
+                  company: str = "", **extra) -> HTMLResponse:
         jobs = db.list_jobs(
             conn,
             status=status or None,
@@ -173,7 +177,29 @@ def create_app(settings: Settings) -> FastAPI:
         )
         return render(request, "jobs.html", jobs=jobs, statuses=STATUSES, status=status,
                       min_score=min_score, company=company,
-                      final_ids=db.final_job_ids(conn))
+                      final_ids=db.final_job_ids(conn),
+                      **{"add_url": "", "add_needs_text": False, "add_error": None, **extra})
+
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
+              company: str = ""):
+        return jobs_page(request, conn, status, min_score, company)
+
+    @app.post("/jobs/add", response_class=HTMLResponse)
+    def post_add_job(request: Request, conn: Conn,
+                     adder: Annotated[Callable, Depends(get_link_adder)],
+                     url: Annotated[str, Form()], text: Annotated[str, Form()] = ""):
+        url = url.strip()[:2000]
+        if not url:
+            return RedirectResponse(f"/?msg={quote('Paste a link to a job posting.')}", status_code=303)
+        try:
+            job_id = adder(conn, url, settings, text=text.strip()[:200_000] or None)
+        except by_link.LinkError as e:
+            if e.needs_text:
+                return jobs_page(request, conn, add_url=url, add_needs_text=True,
+                                 add_error=str(e))
+            return RedirectResponse(f"/?msg={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/jobs/{job_id}/review?start=1", status_code=303)
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: int, conn: Conn):
