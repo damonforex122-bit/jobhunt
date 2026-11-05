@@ -12,7 +12,7 @@ from ..fit.gemini import _short_error
 from ..profile_store import effective_master_path
 from . import TailorResult, _fail, _finish, agents, resume_from_draft, tailor_job
 from .agents import AgentError, Draft, Matches, Requirements
-from .check import _CAP_TERM
+from .check import _CAP_TERM, _SENTENCE_SPLIT
 from .master import MasterError, load_master_with_sha
 from .model import Resume
 
@@ -41,14 +41,27 @@ def summarize_changes(old: Resume | None, new: Resume) -> list[str]:
     return changes or ["No changes"]
 
 
+# Sentence-initial words that are phrasing, not a named term she wants added.
+_NOT_TERMS = {w.casefold() for w in (
+    "Add Make Remove Drop Lead Shorten Mention Use Put Move Keep Rewrite Change Say Show Highlight "
+    "Emphasize Focus Cut Replace I Please Can Could Would Also And But Now Then Maybe Thanks The A An "
+    "It This That Why How What Let Try Give Include Swap Reword Trim Expand Tighten Start End").split()}
+
+
 def _missing_terms(instruction: str, master: Resume) -> list[str]:
-    """Capitalised terms in the instruction (not its first word) that the master never uses."""
+    """Capitalised terms in the instruction that the master never uses.
+
+    A sentence's first word is skipped when it is just phrasing (a command verb, "I", "please"...),
+    but a capitalised first word like "Kubernetes please" counts as a term.
+    """
     have = {t.rstrip(".-").casefold() for t in _TOKEN.findall(master.full_text())}
-    words = instruction.split()
     out: list[str] = []
-    for term in _CAP_TERM.findall(" ".join(words[1:])):
-        term = term.rstrip(".-")
-        if term and term.casefold() not in have and term not in out:
+    for sentence in _SENTENCE_SPLIT.split(instruction):
+        for term in _CAP_TERM.findall(sentence):
+            term = term.rstrip(".-")
+            key = term.casefold()
+            if not term or key in have or key in _NOT_TERMS or term in out:
+                continue
             out.append(term)
     return out
 

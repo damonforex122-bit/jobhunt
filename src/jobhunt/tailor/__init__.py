@@ -66,8 +66,13 @@ def _fail(conn: sqlite3.Connection, job_id: int, message: str) -> TailorResult:
                         fallbacks=old.get("fallbacks", []), error=message)
 
 
-def _draft_from_resume(resume: Resume, ranking: list[str], master: Resume) -> Draft:
-    """The checked resume as a Draft: what the PDF says, so a revision starts from it."""
+def _draft_from_resume(resume: Resume, ranking: list[str], master: Resume, source: Draft) -> Draft:
+    """The checked resume as a Draft: what the PDF says, so a revision starts from it.
+
+    An accepted bullet keeps the source_ids the Writer cited (found by entry and text); a bullet that
+    fell back to master wording is traced to its master bullet by text.
+    """
+    cited = {(de.entry_id, b.text): b.source_ids for de in source.entries for b in de.bullets}
     flat: list[str] = []
     entries = []
     for e in resume.experience:
@@ -75,7 +80,8 @@ def _draft_from_resume(resume: Resume, ranking: list[str], master: Resume) -> Dr
         bullets = []
         for b in e.bullets:
             flat.append(b.id)
-            bullets.append(DraftBullet(text=b.text, source_ids=[own[b.text]] if b.text in own else []))
+            ids = cited.get((e.id, b.text)) or ([own[b.text]] if b.text in own else [])
+            bullets.append(DraftBullet(text=b.text, source_ids=list(ids)))
         entries.append(DraftEntry(entry_id=e.id, bullets=bullets))
     order = [flat.index(i) for i in ranking if i in flat]
     return Draft(summary=resume.summary, entries=entries,
@@ -134,13 +140,13 @@ def _finish(conn: sqlite3.Connection, job_id: int, job: dict, settings: Settings
                               "file_sha256": fitted["sha"], "gaps": gaps, "fallbacks": fallbacks,
                               "error": None, "reqs_json": reqs.model_dump_json(),
                               "matches_json": matches.model_dump_json(),
-                              "draft_json": _draft_from_resume(resume, ranking, master).model_dump_json()})
+                              "draft_json": _draft_from_resume(fitted["resume"], ranking, master, draft).model_dump_json()})
     except Exception as exc:
         message = f"PDF saved to {written} but couldn't record it: {_short_error(exc, settings)}"
         return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
-                            cut=fitted["cut"], error=message), resume
+                            cut=fitted["cut"], error=message), fitted["resume"]
     return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
-                        cut=fitted["cut"]), resume
+                        cut=fitted["cut"]), fitted["resume"]
 
 
 def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=None,

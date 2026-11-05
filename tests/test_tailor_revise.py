@@ -162,3 +162,63 @@ def test_set_final_and_final_job_ids(conn, settings):
     assert db.final_job_ids(conn) == {j}
     db.add_chat(conn, j, "user", "hi")
     assert [(c["role"], c["text"]) for c in db.list_chat(conn, j)] == [("user", "hi")]
+
+
+class EchoGemini(FakeGemini):
+    """Writer that hands back the CURRENT VERSION it was shown, unchanged."""
+
+    def generate_content(self, **kw):
+        if kw["config"]["response_schema"] is Draft and "--- CURRENT VERSION ---" in kw["contents"]:
+            block = kw["contents"].split("--- CURRENT VERSION ---")[1].split("--- HER CHANGE REQUESTS")[0]
+            self.responses[Draft] = Draft.model_validate_json(block.strip())
+        return super().generate_content(**kw)
+
+
+def test_revise_echoing_stored_draft_changes_nothing(conn, settings):
+    j = add_job(conn)
+    first = tailor_job(conn, j, settings, client=fake(draft()))
+    before = pdf_text(first.path)
+    out = revise_job(conn, j, settings, "keep everything",
+                     client=EchoGemini({Requirements: REQS, Matches: MATCHES, Draft: draft(),
+                                        Verdicts: VERDICTS}))
+    assert out.result.error is None
+    assert out.result.fallbacks == []
+    assert out.reply == "No changes"
+    assert pdf_text(out.result.path) == before
+
+
+def test_tailor_rerun_clears_final(conn, settings):
+    j = add_job(conn)
+    tailor_job(conn, j, settings, client=fake(draft()))
+    db.set_final(conn, j)
+    tailor_job(conn, j, settings, client=fake(draft()))
+    assert db.get_resume(conn, j)["final_at"] is None
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Shorten it. Add Kubernetes", ["Kubernetes"]),
+    ("can I mention Spark", ["Spark"]),
+    ("Kubernetes please", ["Kubernetes"]),
+    ("Add Python", []),
+    ("make it shorter", []),
+])
+def test_missing_terms(text, expected):
+    from jobhunt.tailor.revise import _missing_terms
+    assert _missing_terms(text, MASTER) == expected
+
+
+def test_summarize_uses_post_cut_resume(conn, settings, monkeypatch):
+    import jobhunt.tailor as t
+    real = t.fit_to_pages
+
+    def cutting(resume, ranking, out, max_pages=2):
+        fitted, cut, pages = real(resume, ranking, out, max_pages)
+        fitted = fitted.model_copy(deep=True)
+        fitted.experience[1].bullets = []  # pretend the layout cut this entry's bullet
+        return fitted, cut, pages
+
+    monkeypatch.setattr(t, "fit_to_pages", cutting)
+    j = add_job(conn)
+    tailor_job(conn, j, settings, client=fake(draft()))
+    stored = Draft.model_validate_json(db.get_resume(conn, j)["draft_json"])
+    assert [de.bullets for de in stored.entries if de.entry_id == "e1"] == [[]]
