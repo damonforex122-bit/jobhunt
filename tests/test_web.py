@@ -555,3 +555,13 @@ def test_add_bad_url_redirects_not_500(settings):
     c, _ = _link_app(settings)
     r = c.post("/jobs/add", data={"url": "http://[zz/job"}, follow_redirects=False)
     assert r.status_code == 303 and "valid" in r.headers["location"]
+
+
+def test_favicon_served_not_404(tmp_path):
+    from fastapi.testclient import TestClient
+    from jobhunt.config import Settings
+    from jobhunt.web.app import create_app
+    client = TestClient(create_app(Settings(db_path=tmp_path / "t.db")), base_url="http://127.0.0.1")
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
+    assert 'rel="icon"' in client.get("/").text

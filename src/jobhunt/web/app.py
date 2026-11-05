@@ -12,7 +12,7 @@ from urllib.parse import quote, urlsplit
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .. import db, importer, profile_store, scan
@@ -114,6 +114,15 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost")
 _ACTION_ERRORS = (ValueError, OSError, yaml.YAMLError)
 
 
+# Small briefcase-style tab icon, so browsers' automatic /favicon.ico request isn't a 404.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect x="3" y="9" width="26" height="19" rx="4" fill="#4f46e5"/>'
+    '<rect x="11" y="4" width="10" height="7" rx="2" fill="none" stroke="#4f46e5" stroke-width="2.5"/>'
+    '<rect x="3" y="16" width="26" height="2.5" fill="#ffffff" opacity=".8"/></svg>'
+)
+
+
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="jobhunt")
 
@@ -179,6 +188,11 @@ def create_app(settings: Settings) -> FastAPI:
                       min_score=min_score, company=company,
                       final_ids=db.final_job_ids(conn),
                       **{"add_url": "", "add_needs_text": False, "add_error": None, **extra})
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return Response(_FAVICON_SVG, media_type="image/svg+xml",
+                        headers={"Cache-Control": "max-age=86400"})
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
