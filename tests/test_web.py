@@ -430,3 +430,25 @@ def test_resume_panel_notes_older_uploaded_master(settings, tmp_path):
                           "master_sha256": "0" * 64})
     conn.close()
     assert "Made from an older master" in tc(webapp.create_app(s)).get("/jobs/1").text
+
+
+def test_gmail_sync_interview_failure_keeps_suggestion_flash(settings):
+    from jobhunt.gmail.sync import SyncReport
+
+    def boom(conn, s):
+        raise RuntimeError("calendar broke")
+
+    app = webapp.create_app(settings)
+    app.dependency_overrides[webapp.get_gmail_sync] = lambda: lambda conn, s: SyncReport(7, 2)
+    app.dependency_overrides[webapp.get_interview_sync] = lambda: boom
+    r = tc(app).post("/gmail/sync")
+    assert "7 new emails" in r.text and "couldn" in r.text and "read interviews" in r.text
+
+
+def test_gmail_sync_reports_interviews_updated(settings):
+    from jobhunt.gmail.sync import SyncReport
+
+    app = webapp.create_app(settings)
+    app.dependency_overrides[webapp.get_gmail_sync] = lambda: lambda conn, s: SyncReport(1, 0)
+    app.dependency_overrides[webapp.get_interview_sync] = lambda: lambda conn, s: 3
+    assert "3 interviews updated" in tc(app).post("/gmail/sync").text

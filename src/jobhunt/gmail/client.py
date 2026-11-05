@@ -2,7 +2,7 @@
 import base64
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import httpx
@@ -26,6 +26,7 @@ class Message:
     snippet: str
     body: str
     bulk: bool = False  # has List-Unsubscribe / List-Id: newsletter-style mail
+    ics: list[str] = field(default_factory=list)  # text of calendar parts and .ics attachments
 
 
 def _decode(data: str | None) -> str:
@@ -101,7 +102,27 @@ class GmailClient:
         date = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         return Message(id=mid, sender=headers.get("from", ""), subject=headers.get("subject", ""),
                        date=date, snippet=d.get("snippet", ""), body=_body(payload),
-                       bulk="list-unsubscribe" in headers or "list-id" in headers)
+                       bulk="list-unsubscribe" in headers or "list-id" in headers,
+                       ics=self._calendars(mid, payload))
+
+    def attachment(self, mid: str, attachment_id: str) -> bytes:
+        data = self._get(f"{API}/messages/{mid}/attachments/{attachment_id}").get("data") or ""
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+    def _calendars(self, mid: str, payload: dict) -> list[str]:
+        found, stack = [], [payload]
+        while stack:
+            part = stack.pop()
+            stack.extend(reversed(part.get("parts") or []))
+            name = (part.get("filename") or "").lower()
+            if part.get("mimeType") != "text/calendar" and not name.endswith(".ics"):
+                continue
+            body = part.get("body") or {}
+            if body.get("data"):
+                found.append(_decode(body["data"]))
+            elif body.get("attachmentId"):
+                found.append(self.attachment(mid, body["attachmentId"]).decode("utf-8", "replace"))
+        return found
 
     def profile_email(self) -> str:
         return self._get(f"{API}/profile").get("emailAddress", "")

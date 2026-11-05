@@ -83,6 +83,23 @@ CREATE TABLE IF NOT EXISTS resume_chat (
     text TEXT,
     at TEXT
 );
+CREATE TABLE IF NOT EXISTS interviews (
+    uid TEXT PRIMARY KEY,
+    gmail_id TEXT,
+    job_id INTEGER REFERENCES jobs(id),
+    company TEXT,
+    start TEXT,  -- ISO-8601, UTC with offset
+    end TEXT,
+    summary TEXT,
+    location TEXT,
+    link TEXT,
+    sender TEXT,
+    subject TEXT,
+    status TEXT  -- scheduled | cancelled
+);
+CREATE TABLE IF NOT EXISTS interview_seen (
+    gmail_id TEXT PRIMARY KEY
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -339,6 +356,39 @@ def gmail_seen_ids(conn: sqlite3.Connection, *, settled_only: bool = False) -> s
 
 def jobs_for_matching(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT id, company, title, status FROM jobs")]
+
+
+_INTERVIEW_COLS = ("uid", "gmail_id", "job_id", "company", "start", "end", "summary", "location",
+                   "link", "sender", "subject", "status")
+
+
+def upsert_interview(conn: sqlite3.Connection, row: dict) -> None:
+    vals = [row.get(c) for c in _INTERVIEW_COLS]
+    sets = ", ".join(f"{c} = excluded.{c}" for c in _INTERVIEW_COLS[1:])
+    conn.execute(
+        f"INSERT INTO interviews ({', '.join(_INTERVIEW_COLS)}) "
+        f"VALUES ({', '.join('?' * len(_INTERVIEW_COLS))}) ON CONFLICT(uid) DO UPDATE SET {sets}",
+        vals)
+    conn.commit()
+
+
+def list_interviews(conn: sqlite3.Connection, *, upcoming_only: bool = True, now: str) -> list[dict]:
+    sql = ("SELECT i.*, j.title AS job_title, j.status AS job_status FROM interviews i "
+           "LEFT JOIN jobs j ON j.id = i.job_id WHERE COALESCE(i.status, '') != 'cancelled'")
+    args: list = []
+    if upcoming_only:
+        sql += " AND i.start >= ?"
+        args.append(now)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY i.start", args)]
+
+
+def interview_seen_ids(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT gmail_id FROM interview_seen")}
+
+
+def mark_interview_seen(conn: sqlite3.Connection, gmail_id: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO interview_seen (gmail_id) VALUES (?)", (gmail_id,))
+    conn.commit()
 
 
 def save_gmail_message(conn: sqlite3.Connection, gmail_id: str, *, job_id: int | None = None,

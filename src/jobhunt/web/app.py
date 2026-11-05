@@ -19,6 +19,7 @@ from .. import db, importer, profile_store, scan
 from ..config import KEY_FIELDS, Settings, reload_settings, short_error
 from ..envfile import mask, update_env
 from ..fit import grade_job
+from ..gmail import interviews as gmail_interviews
 from ..gmail import sync as gmail_sync
 from ..gmail.auth import GmailNotConnected
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
@@ -68,6 +69,10 @@ def get_importer() -> Callable:
 
 def get_gmail_sync() -> Callable:
     return gmail_sync.run_sync
+
+
+def get_interview_sync() -> Callable:
+    return gmail_interviews.run_interview_sync
 
 
 def _banner(s: Settings) -> list[str]:
@@ -216,10 +221,15 @@ def create_app(settings: Settings) -> FastAPI:
                       gmail_connected=settings.gmail_token.exists())
 
     @app.post("/gmail/sync")
-    def post_gmail_sync(conn: Conn, syncer: Annotated[Callable, Depends(get_gmail_sync)]):
+    def post_gmail_sync(conn: Conn, syncer: Annotated[Callable, Depends(get_gmail_sync)],
+                        interview_syncer: Annotated[Callable, Depends(get_interview_sync)]):
         try:
             r = syncer(conn, settings)
-            msg = f"Checked {r.scanned} new emails, {r.suggested} suggested moves."
+            msg = f"Checked {r.scanned} new emails, {r.suggested} suggested moves"
+            try:
+                msg += f", {interview_syncer(conn, settings)} interviews updated."
+            except Exception as e:  # must not break the suggestion sync
+                msg += f", couldn't read interviews: {short_error(e)}."
         except GmailNotConnected as e:
             msg = str(e)
         except Exception as e:  # network/Google errors must not 500 the page

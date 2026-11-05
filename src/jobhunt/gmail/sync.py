@@ -94,6 +94,8 @@ def register(sub) -> None:
         conn = db.connect(settings.db_path)
         try:
             report = run_sync(conn, settings, days=args.days, recheck=args.recheck)
+            from .interviews import run_interview_sync
+            interviews = run_interview_sync(conn, settings, days=args.days)
         except GmailNotConnected as e:
             print(e, file=sys.stderr)
             return 1
@@ -107,7 +109,7 @@ def register(sub) -> None:
         finally:
             conn.close()
         print(f"Checked {report.scanned} new emails, {report.suggested} suggested moves. "
-              "Review them on the Pipeline page.")
+              f"{interviews} interviews updated. Review them on the Pipeline and Interviews pages.")
         return 0
 
     s.set_defaults(handler=sync_handler)
