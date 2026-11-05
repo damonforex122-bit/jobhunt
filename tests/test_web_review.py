@@ -164,3 +164,32 @@ def test_review_post_rejects_cross_site(client, fakes):
         r = client.post(path, data=data, headers={"Origin": "http://evil.test"})
         assert r.status_code == 403
     assert fakes.revised == [] and fakes.tailored == []
+
+
+def test_runner_that_raises_does_not_stick_the_job(client, settings, fakes):
+    def bad_runner(fn):
+        raise RuntimeError("no threads")
+    client.app.dependency_overrides[review.get_runner] = lambda: bad_runner
+    with pytest.raises(RuntimeError):
+        client.post("/jobs/1/review/messages", data={"text": "Tailor this resume"})
+    assert review.RUNNING == {}
+    client.app.dependency_overrides[review.get_runner] = lambda: (lambda fn: fn())
+    r = client.post("/jobs/1/review/messages", data={"text": "Tailor this resume"})
+    assert "Tailored your resume." in r.text and fakes.tailored == [1]
+
+
+def test_cross_site_start_does_not_tailor(client, fakes):
+    client.get("/jobs/1/review?start=1", headers={"Sec-Fetch-Site": "cross-site"})
+    assert fakes.tailored == []
+    client.get("/jobs/1/review?start=1", headers={"Sec-Fetch-Site": "same-origin"})
+    assert fakes.tailored == [1]
+
+
+def test_start_without_fetch_site_header_tailors(client, fakes):
+    client.get("/jobs/1/review?start=1")
+    assert fakes.tailored == [1]
+
+
+def test_first_instruction_without_pdf_goes_to_reviser(client, fakes):
+    client.post("/jobs/1/review/messages", data={"text": "lead with evals"})
+    assert fakes.revised == ["lead with evals"] and fakes.tailored == []

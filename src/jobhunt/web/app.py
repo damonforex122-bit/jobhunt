@@ -383,6 +383,7 @@ def create_app(settings: Settings) -> FastAPI:
                 changes[f.upper()] = None
             else:
                 value = form.get(f)
+                value = value.strip() if isinstance(value, str) else value
                 if isinstance(value, str) and value:
                     changes[f.upper()] = value
         if not changes:

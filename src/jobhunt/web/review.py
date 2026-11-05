@@ -82,8 +82,6 @@ def register(app: FastAPI, settings: Settings, Conn, render: Callable, job_or_40
             if job_id in RUNNING:
                 return False
             RUNNING[job_id] = {"instruction": text, "progress": []}
-        first = not (db.get_resume(conn, job_id) or {}).get("path")
-
         def progress(line: str) -> None:
             with _LOCK:
                 if job_id in RUNNING:
@@ -94,7 +92,7 @@ def register(app: FastAPI, settings: Settings, Conn, render: Callable, job_or_40
             try:
                 bg = db.connect(settings.db_path, check_same_thread=False)
                 try:
-                    if first:
+                    if tailor_only:
                         reply = _tailor_reply(tailor(bg, job_id, settings, progress=progress))
                     else:
                         rev = reviser(bg, job_id, settings, text, progress=progress)
@@ -111,14 +109,23 @@ def register(app: FastAPI, settings: Settings, Conn, render: Callable, job_or_40
                 if bg is not None:
                     bg.close()
 
-        runner(work)
+        try:
+            first = not (db.get_resume(conn, job_id) or {}).get("path")
+            # With no PDF yet, revise_job tailors first and then applies the instruction.
+            tailor_only = first and text == TAILOR_FIRST
+            runner(work)
+        except BaseException:
+            with _LOCK:
+                RUNNING.pop(job_id, None)
+            raise
         return True
 
     @app.get("/jobs/{job_id}/review", response_class=HTMLResponse)
     def review_page(request: Request, job_id: int, conn: Conn, runner: Runner, reviser: Reviser,
                     tailor: Tailorer, start: str = ""):
         job = job_or_404(conn, job_id)
-        if start and not (db.get_resume(conn, job_id) or {}).get("path"):
+        cross_site = request.headers.get("sec-fetch-site", "").lower() == "cross-site"
+        if start and not cross_site and not (db.get_resume(conn, job_id) or {}).get("path"):
             launch(conn, job_id, TAILOR_FIRST, runner, reviser, tailor)  # no-op if already running
         resume = db.get_resume(conn, job_id)
         return render(request, "review.html", **header_ctx(conn, job),

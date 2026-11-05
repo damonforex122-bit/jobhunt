@@ -50,7 +50,7 @@ def default_http() -> httpx.Client:
 def _resolve(host: str) -> list[str]:
     try:
         return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
-    except OSError:
+    except (OSError, UnicodeError):
         return []
 
 
@@ -66,10 +66,13 @@ def _bad_ip(addr: str) -> bool:
 
 def check_public_url(url: str, resolve: bool = True) -> None:
     """Reject non-http(s) URLs and any host that is, or resolves to, a non-public address."""
-    parts = urlsplit(url.strip())
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
+        raise LinkError("That doesn't look like a valid web link.", needs_text=False) from None
     if parts.scheme.lower() not in ("http", "https"):
         raise LinkError("Only http(s) links can be added.")
-    host = (parts.hostname or "").lower().rstrip(".")
     if not host:
         raise LinkError("That doesn't look like a link.")
     private = LinkError("Links to this computer or a private network can't be added.")
@@ -110,7 +113,7 @@ def _fetch_page(http: httpx.Client, url: str) -> str:
                     if len(body) > MAX_BYTES:
                         raise LinkError("That page is too large to read.", needs_text=True)
                 encoding = resp.charset_encoding or "utf-8"
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
             raise LinkError(f"Couldn't load the page ({type(e).__name__}).", needs_text=True) from None
         finally:
             http.cookies.clear()  # no cookies carried between fetches
@@ -187,7 +190,7 @@ def _api_get(http: httpx.Client, url: str):
     try:
         resp = http.get(url, timeout=TIMEOUT_S, follow_redirects=False,
                         headers={"User-Agent": USER_AGENT})
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
         raise LinkError(f"Couldn't reach the job board ({type(e).__name__}).", needs_text=True) from None
     finally:
         http.cookies.clear()

@@ -187,3 +187,9 @@ def test_profile_posts_reject_cross_site(client, path, data):
     r = client.post("/profile/master", files={"file": ("a.pdf", b"%PDF-", "application/pdf")},
                     headers={"Origin": "http://evil.example"})
     assert r.status_code == 403
+
+
+def test_pasted_key_is_stripped(client, settings):
+    client.post("/profile/keys", data={"gemini_api_key": "  newkey1234\n"})
+    assert "GEMINI_API_KEY=newkey1234\n" in settings.env_path.read_text()
+    assert settings.gemini_api_key == "newkey1234"

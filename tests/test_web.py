@@ -549,3 +549,9 @@ def test_add_post_rejects_cross_site(settings):
         r = c.post("/jobs/add", data={"url": "https://job-boards.greenhouse.io/a/jobs/1"},
                    headers=headers, follow_redirects=False)
         assert r.status_code == 403
+
+
+def test_add_bad_url_redirects_not_500(settings):
+    c, _ = _link_app(settings)
+    r = c.post("/jobs/add", data={"url": "http://[zz/job"}, follow_redirects=False)
+    assert r.status_code == 303 and "valid" in r.headers["location"]
