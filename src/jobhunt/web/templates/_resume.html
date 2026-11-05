@@ -4,6 +4,7 @@
 {% if resume and resume.path %}
 <p><a class="link link-primary" href="/jobs/{{ job.id }}/resume.pdf" target="_blank" rel="noopener">Open PDF</a>
  &middot; <span class="text-sm opacity-60">Saved in {{ output_dir }}</span></p>
+{% if stale %}<p class="text-sm text-warning">Made from an older master. Tailor again to use your current one.</p>{% endif %}
 {% if resume.gaps %}<p><b>Gaps:</b></p><ul class="list-disc ml-6">{% for g in resume.gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
 {% if resume.fallbacks %}<p><b>Kept your original wording:</b></p><ul class="list-disc ml-6">{% for f in resume.fallbacks %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 {% endif %}

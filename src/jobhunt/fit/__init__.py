@@ -1,9 +1,12 @@
 import sqlite3
+from pathlib import Path
 
 from .. import db
 from ..config import Settings
 from ..models import Fit
 from ..profile import load_resume_text
+from ..profile_store import get_master
+from ..tailor.master import MasterError, load_master
 from .gemini import grade
 
 
@@ -11,7 +14,14 @@ def grade_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=
     job = db.get_job(conn, job_id)
     if job is None:
         raise ValueError(f"No job with id {job_id}")
-    resume = load_resume_text(settings.proficiently_dir)
+    info = get_master(conn)
+    if info:
+        try:
+            resume = load_master(conn, Path(info.path)).full_text()
+        except MasterError:  # unreadable upload: fall back to the proficiently resume
+            resume = load_resume_text(settings.proficiently_dir)
+    else:
+        resume = load_resume_text(settings.proficiently_dir)
     fit = grade(job, resume, settings, client=client)
     old = db.get_fit(conn, job_id)
     if fit.llm_score is None and old is not None and old.llm_score is not None:

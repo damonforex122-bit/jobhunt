@@ -1,5 +1,6 @@
 """Tailor the master resume to a job posting."""
 
+import re
 import sqlite3
 from collections.abc import Callable
 from functools import partial
@@ -10,14 +11,42 @@ from pydantic import BaseModel
 from .. import db
 from ..config import Settings
 from ..fit.gemini import _short_error
+from ..profile_store import Links, effective_master_path, get_links
 from . import agents
 from .agents import AgentError
 from .check import assemble
 from .master import MasterError, load_master_with_sha
+from .model import Link, Resume
 from .output import choose_path, company_folder, file_sha256, reusable_owned, write_atomic
 from .render import fit_to_pages
 
 MAX_PAGES = 2
+
+
+def _http_url(value: str) -> str:
+    v = (value or "").strip()
+    return v if re.match(r"https?://", v, re.I) else ""
+
+
+def apply_profile_links(resume: Resume, links: Links) -> Resume:
+    """A copy whose header links carry the profile's Website, LinkedIn and GitHub URLs.
+
+    A non-blank http(s) profile link replaces the URL of the header link with the same label
+    (case-insensitive) or is appended when there's none; blank or non-http(s) ones keep the master's.
+    """
+    header_links = [lk.model_copy() for lk in resume.header.links]
+    for label, raw in (("Website", links.website), ("LinkedIn", links.linkedin), ("GitHub", links.github)):
+        url = _http_url(raw)
+        if not url:
+            continue
+        for lk in header_links:
+            if lk.label.strip().lower() == label.lower():
+                lk.url = url
+                break
+        else:
+            header_links.append(Link(label=label, url=url))
+    header = resume.header.model_copy(update={"links": header_links})
+    return resume.model_copy(update={"header": header})
 
 
 class TailorResult(BaseModel):
@@ -54,7 +83,7 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
 
     try:
         step("Reading your master resume…")
-        master, master_sha = load_master_with_sha(conn, settings.master_resume_path)
+        master, master_sha = load_master_with_sha(conn, effective_master_path(conn, settings))
         step("Reading the posting…")
         reqs = agents.read_posting(client, settings, posting, job["company"], job["title"])
         step("Matching it to your resume…")
@@ -64,6 +93,7 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         step("Checking every rewrite against your master…")
         judge_fn = partial(agents.judge, client, settings)
         resume, ranking, fallbacks = assemble(draft, master, judge_fn)
+        resume = apply_profile_links(resume, get_links(conn))
 
         _, gap_reqs = agents.supported_requirements(master, reqs.requirements, matches)
         gaps = [r.text for r in gap_reqs]

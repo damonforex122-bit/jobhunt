@@ -24,7 +24,7 @@ from ..gmail.auth import GmailNotConnected
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..tailor import tailor_job
-from ..tailor.master import MasterError, load_master_with_sha
+from ..tailor.master import MasterError, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
 
 MAX_MASTER_BYTES = 10 * 1024 * 1024
@@ -124,9 +124,17 @@ def create_app(settings: Settings) -> FastAPI:
         return job
 
     def panel_ctx(conn, job: dict, **extra) -> dict:
+        resume = db.get_resume(conn, job["id"])
+        stale = False
+        if resume and resume.get("path") and resume.get("master_sha256"):
+            current = profile_store.effective_master_path(conn, settings)
+            try:
+                stale = current.is_file() and master_sha256(current) != resume["master_sha256"]
+            except OSError:
+                stale = False
         return dict(job=job, fit=db.get_fit(conn, job["id"]),
                     people=db.list_people(conn, job["company"]),
-                    resume=db.get_resume(conn, job["id"]),
+                    resume=resume, stale=stale,
                     can_tailor=has_ai_key(settings), output_dir=settings.resume_output_dir,
                     **extra)
 

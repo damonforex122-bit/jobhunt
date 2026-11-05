@@ -8,7 +8,7 @@ import yaml
 
 from . import db, filters
 from .config import Settings
-from .profile import load_preferences
+from .profile_store import effective_preferences
 from .sources import ats
 
 _COMP_RE = re.compile(r"^Compensation:\s*(.+)$", re.M)
@@ -38,7 +38,7 @@ def _fill_salary(job):
 def run_scan(
     conn: sqlite3.Connection, settings: Settings, client: httpx.Client | None = None
 ) -> ScanReport:
-    prefs = load_preferences(settings.proficiently_dir)
+    prefs = effective_preferences(conn, settings)
     for co in ats.load_watchlist(settings.watchlist_path):
         db.upsert_company(conn, co)
     companies = [c for c in db.list_companies(conn) if c.ats]

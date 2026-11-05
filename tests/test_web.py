@@ -393,3 +393,26 @@ def test_base_uses_daisyui_light_theme(client):
 def test_nav_links(client):
     html = client.get("/").text
     assert 'href="/interviews"' in html and 'href="/profile"' in html
+
+
+def test_resume_panel_notes_older_master(settings, tmp_path):
+    s = _tailor_settings(settings, tmp_path)
+    s.master_resume_path.parent.mkdir(parents=True, exist_ok=True)
+    s.master_resume_path.write_bytes(b"%PDF current master")
+    conn = db.connect(s.db_path)
+    db.save_resume(conn, {"job_id": 1, "path": str(tmp_path / "out" / "r.pdf"),
+                          "master_sha256": "0" * 64})
+    conn.close()
+    assert "Made from an older master" in tc(webapp.create_app(s)).get("/jobs/1").text
+    conn = db.connect(s.db_path)
+    from jobhunt.tailor.master import master_sha256
+    db.save_resume(conn, {"job_id": 1, "path": str(tmp_path / "out" / "r.pdf"),
+                          "master_sha256": master_sha256(s.master_resume_path)})
+    conn.close()
+    assert "Made from an older master" not in tc(webapp.create_app(s)).get("/jobs/1").text
+    s.master_resume_path.unlink()
+    conn = db.connect(s.db_path)
+    db.save_resume(conn, {"job_id": 1, "path": str(tmp_path / "out" / "r.pdf"),
+                          "master_sha256": "0" * 64})
+    conn.close()
+    assert "Made from an older master" not in tc(webapp.create_app(s)).get("/jobs/1").text
