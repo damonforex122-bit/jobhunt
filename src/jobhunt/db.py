@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS profile (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS resume_chat (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER REFERENCES jobs(id),
+    role TEXT CHECK(role IN ('user','app')),
+    text TEXT,
+    at TEXT
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -103,6 +110,10 @@ _ADDED_COLUMNS = [
     ("gmail_messages", "company", "TEXT"),
     ("gmail_messages", "title", "TEXT"),
     ("resumes", "file_sha256", "TEXT"),
+    ("resumes", "reqs_json", "TEXT"),
+    ("resumes", "matches_json", "TEXT"),
+    ("resumes", "draft_json", "TEXT"),
+    ("resumes", "final_at", "TEXT"),
 ]
 
 
@@ -428,11 +439,14 @@ def save_master_cache(conn: sqlite3.Connection, sha: str, resume_json: str) -> N
 def save_resume(conn: sqlite3.Connection, rec: dict) -> None:
     conn.execute(
         """INSERT OR REPLACE INTO resumes
-           (job_id, path, master_sha256, created_at, gaps_json, fallbacks_json, error, file_sha256)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (job_id, path, master_sha256, created_at, gaps_json, fallbacks_json, error, file_sha256,
+            reqs_json, matches_json, draft_json, final_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (rec["job_id"], rec.get("path"), rec.get("master_sha256"), _now(),
          json.dumps(rec.get("gaps") or []), json.dumps(rec.get("fallbacks") or []),
-         rec.get("error"), rec.get("file_sha256")))
+         rec.get("error"), rec.get("file_sha256"),
+         rec.get("reqs_json"), rec.get("matches_json"), rec.get("draft_json"),
+         rec.get("final_at")))  # a fresh save passes no final_at (so it is cleared); _fail passes the old row's
     conn.commit()
 
 
@@ -450,3 +464,26 @@ def resume_paths(conn: sqlite3.Connection, exclude_job: int | None = None) -> se
     rows = conn.execute("SELECT path FROM resumes WHERE path IS NOT NULL AND job_id IS NOT ?",
                         (exclude_job,))
     return {r[0] for r in rows}
+
+
+# --- resume review chat ------------------------------------------------------
+
+def add_chat(conn: sqlite3.Connection, job_id: int, role: str, text: str) -> None:
+    conn.execute("INSERT INTO resume_chat (job_id, role, text, at) VALUES (?, ?, ?, ?)",
+                 (job_id, role, text, _now()))
+    conn.commit()
+
+
+def list_chat(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    rows = conn.execute("SELECT id, job_id, role, text, at FROM resume_chat WHERE job_id = ? ORDER BY id",
+                        (job_id,))
+    return [dict(r) for r in rows]
+
+
+def set_final(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute("UPDATE resumes SET final_at = ? WHERE job_id = ?", (_now(), job_id))
+    conn.commit()
+
+
+def final_job_ids(conn: sqlite3.Connection) -> set[int]:
+    return {r[0] for r in conn.execute("SELECT job_id FROM resumes WHERE final_at IS NOT NULL")}

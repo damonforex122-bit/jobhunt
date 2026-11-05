@@ -13,10 +13,10 @@ from ..config import Settings
 from ..fit.gemini import _short_error
 from ..profile_store import Links, effective_master_path, get_links
 from . import agents
-from .agents import AgentError
+from .agents import AgentError, Draft, DraftBullet, DraftEntry, DraftSkills
 from .check import assemble
 from .master import MasterError, load_master_with_sha
-from .model import Link, Resume
+from .model import Bullet, Link, Resume
 from .output import choose_path, company_folder, file_sha256, reusable_owned, write_atomic
 from .render import fit_to_pages
 
@@ -66,6 +66,83 @@ def _fail(conn: sqlite3.Connection, job_id: int, message: str) -> TailorResult:
                         fallbacks=old.get("fallbacks", []), error=message)
 
 
+def _draft_from_resume(resume: Resume, ranking: list[str], master: Resume) -> Draft:
+    """The checked resume as a Draft: what the PDF says, so a revision starts from it."""
+    flat: list[str] = []
+    entries = []
+    for e in resume.experience:
+        own = {b.text: b.id for b in next((m for m in master.experience if m.id == e.id), e).bullets}
+        bullets = []
+        for b in e.bullets:
+            flat.append(b.id)
+            bullets.append(DraftBullet(text=b.text, source_ids=[own[b.text]] if b.text in own else []))
+        entries.append(DraftEntry(entry_id=e.id, bullets=bullets))
+    order = [flat.index(i) for i in ranking if i in flat]
+    return Draft(summary=resume.summary, entries=entries,
+                 skills=[DraftSkills(category_id=s.id, items=list(s.items)) for s in resume.skills],
+                 ranking=order)
+
+
+def resume_from_draft(draft: Draft, master: Resume) -> Resume:
+    """The master with a stored draft's summary and bullet texts (to compare what changed)."""
+    by_entry = {de.entry_id: de for de in draft.entries}
+    experience = []
+    for e in master.experience:
+        de = by_entry.get(e.id)
+        if de is not None:
+            e = e.model_copy(update={"bullets": [Bullet(id=f"{e.id}t{k}", text=b.text)
+                                                 for k, b in enumerate(de.bullets)]})
+        experience.append(e)
+    return master.model_copy(update={"summary": draft.summary, "experience": experience})
+
+
+def _finish(conn: sqlite3.Connection, job_id: int, job: dict, settings: Settings, master: Resume,
+            master_sha: str, reqs: agents.Requirements, matches: agents.Matches, draft: Draft, client,
+            step: Callable[[str], None]) -> tuple[TailorResult, Resume]:
+    """Everything after the Writer: the checks, profile links, PDF and the saved record.
+
+    Shared by tailor_job and revise_job so a revised draft passes exactly the same checks.
+    Returns the result and the checked resume; raises if rendering fails.
+    """
+    step("Checking every rewrite against your master…")
+    judge_fn = partial(agents.judge, client, settings)
+    resume, ranking, fallbacks = assemble(draft, master, judge_fn)
+    resume = apply_profile_links(resume, get_links(conn))
+
+    _, gap_reqs = agents.supported_requirements(master, reqs.requirements, matches)
+    gaps = [r.text for r in gap_reqs]
+
+    old = db.get_resume(conn, job_id)
+    owned = Path(old["path"]) if old and old.get("path") else None
+    owned = reusable_owned(owned, old.get("file_sha256") if old else None,
+                           db.resume_paths(conn, exclude_job=job_id), settings.resume_output_dir)
+    folder = company_folder(settings.resume_output_dir, job["company"])
+    dest = choose_path(folder, job["title"], owned)
+    fitted: dict = {}
+    step("Laying out the PDF…")
+
+    def render(tmp: Path) -> None:
+        fitted["resume"], fitted["cut"], fitted["pages"] = fit_to_pages(resume, ranking, tmp)
+        fitted["sha"] = file_sha256(tmp)
+
+    write_atomic(render, dest)
+    written = dest  # from here the PDF exists; only recording it can still fail
+    if fitted["pages"] > MAX_PAGES:
+        fallbacks = [*fallbacks, f"Couldn't fit in {MAX_PAGES} pages: {fitted['pages']} pages"]
+    try:
+        db.save_resume(conn, {"job_id": job_id, "path": str(written), "master_sha256": master_sha,
+                              "file_sha256": fitted["sha"], "gaps": gaps, "fallbacks": fallbacks,
+                              "error": None, "reqs_json": reqs.model_dump_json(),
+                              "matches_json": matches.model_dump_json(),
+                              "draft_json": _draft_from_resume(resume, ranking, master).model_dump_json()})
+    except Exception as exc:
+        message = f"PDF saved to {written} but couldn't record it: {_short_error(exc, settings)}"
+        return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
+                            cut=fitted["cut"], error=message), resume
+    return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
+                        cut=fitted["cut"]), resume
+
+
 def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=None,
                progress: Callable[[str], None] | None = None) -> TailorResult:
     """`progress` is told each step as it starts (the CLI prints them; runs take about a minute)."""
@@ -90,46 +167,16 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         matches = agents.match(client, settings, master, reqs)
         step("Writing the tailored version…")
         draft = agents.write(client, settings, master, reqs, matches)
-        step("Checking every rewrite against your master…")
-        judge_fn = partial(agents.judge, client, settings)
-        resume, ranking, fallbacks = assemble(draft, master, judge_fn)
-        resume = apply_profile_links(resume, get_links(conn))
-
-        _, gap_reqs = agents.supported_requirements(master, reqs.requirements, matches)
-        gaps = [r.text for r in gap_reqs]
-
-        old = db.get_resume(conn, job_id)
-        owned = Path(old["path"]) if old and old.get("path") else None
-        owned = reusable_owned(owned, old.get("file_sha256") if old else None,
-                               db.resume_paths(conn, exclude_job=job_id), settings.resume_output_dir)
-        folder = company_folder(settings.resume_output_dir, job["company"])
-        dest = choose_path(folder, job["title"], owned)
-        fitted: dict = {}
-        step("Laying out the PDF…")
-
-        def render(tmp: Path) -> None:
-            fitted["resume"], fitted["cut"], fitted["pages"] = fit_to_pages(resume, ranking, tmp)
-            fitted["sha"] = file_sha256(tmp)
-
-        write_atomic(render, dest)
-        written = dest  # from here the PDF exists; only recording it can still fail
-        if fitted["pages"] > MAX_PAGES:
-            fallbacks = [*fallbacks, f"Couldn't fit in {MAX_PAGES} pages: {fitted['pages']} pages"]
-        try:
-            db.save_resume(conn, {"job_id": job_id, "path": str(written), "master_sha256": master_sha,
-                                  "file_sha256": fitted["sha"], "gaps": gaps, "fallbacks": fallbacks,
-                                  "error": None})
-        except Exception as exc:
-            message = f"PDF saved to {written} but couldn't record it: {_short_error(exc, settings)}"
-            return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
-                                cut=fitted["cut"], error=message)
+        result, _resume = _finish(conn, job_id, job, settings, master, master_sha, reqs, matches,
+                                  draft, client, step)
+        return result
     except (MasterError, AgentError) as exc:
         return _fail(conn, job_id, str(exc))
     except Exception as exc:  # never crash the caller (or a web request) on a rendering/agent bug
         return _fail(conn, job_id, _short_error(exc, settings))
 
-    return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
-                        cut=fitted["cut"])
+
+from .revise import RevisionResult, revise_job, summarize_changes  # noqa: E402,F401  (revise imports this module)
 
 
 def register(sub) -> None:

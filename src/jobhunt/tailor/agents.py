@@ -169,13 +169,27 @@ def supported_requirements(resume: Resume, reqs: list[Requirement], matches: Mat
     return ([r for r in reqs if evidence.get(r.id)], [r for r in reqs if not evidence.get(r.id)])
 
 
-def write(client, settings: Settings, resume: Resume, reqs: Requirements, matches: Matches) -> Draft:
+def write(client, settings: Settings, resume: Resume, reqs: Requirements, matches: Matches,
+          previous: Draft | None = None, instructions: list[str] | None = None) -> Draft:
     evidence = _evidence(resume, matches)
     sup, gap_reqs = supported_requirements(resume, reqs.requirements, matches)
     supported = [{**r.model_dump(), "evidence_ids": evidence[r.id]} for r in sup]
     gaps = [r.text for r in gap_reqs]
     supported_json = json.dumps(supported, indent=1, ensure_ascii=False)
     gap_lines = "\n".join(f"- {g}" for g in gaps) or "- (none)"
+    revision = ""
+    if previous is not None or instructions:
+        lines = "\n".join(f"{n}. {t}" for n, t in enumerate(instructions or [], 1)) or "(none)"
+        current = previous.model_dump_json(indent=1) if previous is not None else "(none)"
+        revision = f"""
+--- CURRENT VERSION ---
+{current}
+
+--- HER CHANGE REQUESTS (oldest first) ---
+{lines}
+
+Apply her change requests only where the master supports them; never add facts the sources don't state.
+"""
     prompt = f"""You tailor a candidate's resume to a job posting by selecting and rewording her real master-resume material.
 
 Rules:
@@ -198,7 +212,7 @@ Rules:
 
 --- Gaps (do not write about these) ---
 {gap_lines}
-"""
+{revision}"""
     return _call(client, settings, prompt, Draft)
 
 
