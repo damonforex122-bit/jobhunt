@@ -94,6 +94,11 @@ def register(sub) -> None:
         conn = db.connect(settings.db_path)
         try:
             report = run_sync(conn, settings, days=args.days, recheck=args.recheck)
+            from .interviews import run_interview_sync
+            try:
+                note = f"{run_interview_sync(conn, settings, days=args.days)} interviews updated. "
+            except Exception as e:  # noqa: BLE001 - suggestions already succeeded
+                note = f"Couldn't read interviews: {short_error(e)}. "
         except GmailNotConnected as e:
             print(e, file=sys.stderr)
             return 1
@@ -104,11 +109,6 @@ def register(sub) -> None:
         except httpx.HTTPError as e:
             print(f"Gmail request failed: {type(e).__name__}", file=sys.stderr)
             return 1
-            from .interviews import run_interview_sync
-            try:
-                note = f"{run_interview_sync(conn, settings, days=args.days)} interviews updated. "
-            except Exception as e:  # noqa: BLE001 - suggestions already succeeded
-                note = f"Couldn't read interviews: {short_error(e)}. "
         finally:
             conn.close()
         print(f"Checked {report.scanned} new emails, {report.suggested} suggested moves. "
