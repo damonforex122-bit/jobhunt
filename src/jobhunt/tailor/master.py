@@ -10,6 +10,7 @@ from pypdf import PdfReader
 
 from jobhunt import db
 from jobhunt.config import short_error
+from jobhunt.tailor.providers import has_ai_key
 from jobhunt.tailor.model import (
     Bullet,
     EducationLine,
@@ -224,6 +225,19 @@ def _experience(lines: list[_Line], margin: float) -> list[Entry]:
     return entries
 
 
+def link_annotations(reader: PdfReader, page: int) -> list[tuple[float, float, str]]:
+    """(left x, middle y, uri) of each link annotation on a page, in the PDF's own order."""
+    out: list[tuple[float, float, str]] = []
+    for annot in reader.pages[page].get("/Annots", []) or []:
+        a = annot.get_object()
+        uri = (a.get("/A") or {}).get("/URI")
+        if uri is None or a.get("/Subtype") != "/Link":
+            continue
+        x0, y0, x1, y1 = (float(v) for v in a["/Rect"])
+        out.append((x0, (y0 + y1) / 2, str(uri)))
+    return out
+
+
 def _header(lines: list[_Line], reader: PdfReader) -> Header:
     if len(lines) < 2:
         raise MasterError("header not found")
@@ -231,15 +245,7 @@ def _header(lines: list[_Line], reader: PdfReader) -> Header:
     contact_text = " ".join(ln.text for ln in lines[1:])
     parts = [p.strip() for p in contact_text.split("|") if p.strip()]
     contact_line = lines[1]
-    urls: list[tuple[float, str]] = []
-    for annot in reader.pages[contact_line.page].get("/Annots", []) or []:
-        a = annot.get_object()
-        uri = (a.get("/A") or {}).get("/URI")
-        if uri is None or a.get("/Subtype") != "/Link":
-            continue
-        x0, y0, x1, y1 = (float(v) for v in a["/Rect"])
-        if abs((y0 + y1) / 2 - contact_line.y) < 15:
-            urls.append((x0, str(uri)))
+    urls = [(x, u) for x, y, u in link_annotations(reader, contact_line.page) if abs(y - contact_line.y) < 15]
     deduped: list[str] = []
     for _, url in sorted(urls):
         if not deduped or deduped[-1] != url:
@@ -293,7 +299,7 @@ def _squash(text: str) -> str:
     return "".join(text.split())
 
 
-PARSER_VERSION = 1  # bump when the parser or the Resume model changes: invalidates cached parses
+PARSER_VERSION = 2  # bump when the parser or the Resume model changes: invalidates cached parses
 UNCOVERED_TOLERANCE = 0  # characters of PDF text no parsed string accounts for
 _SEPARATORS = "●•|:,"
 
@@ -367,8 +373,32 @@ def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
     return load_master_with_sha(conn, path)[0]
 
 
-def load_master_with_sha(conn: sqlite3.Connection, path: Path | None) -> tuple[Resume, str]:
-    """Like `load_master`, plus the file hash the cache was keyed on."""
+NO_KEY_MESSAGE = "Add an AI key on the Setup page so the app can read your resume."
+UNRELIABLE_MESSAGE = ("Couldn't read your resume reliably — try exporting it again as PDF from "
+                      "Google Docs/Word, or use LinkedIn → More → Save to PDF.")
+
+
+def _strict(path: Path) -> Resume:
+    """The layout parser plus its verification. Raises MasterError."""
+    try:
+        resume = parse_master(path)
+        missing = verify(resume, _pdf_text(path))
+    except Exception as e:
+        raise MasterError(f"Couldn't read the master resume reliably ({path}): {short_error(e)}") from e
+    if missing:
+        shown = "; ".join(repr(m[:40]) for m in missing[:3])
+        raise MasterError(short_error(Exception(
+            f"Couldn't read the master resume reliably ({path}): {len(missing)} problems, e.g. {shown}")))
+    return resume
+
+
+def load_master_with_sha(conn: sqlite3.Connection, path: Path | None, client=None,
+                         settings=None) -> tuple[Resume, str]:
+    """Like `load_master`, plus the file hash the cache was keyed on.
+
+    When the strict parser fails and a `client` is given, the AI reads the PDF instead; its read is
+    only kept if every string in it is really in the PDF's text (`master_ai.verify_ai`).
+    """
     if path is None:
         raise MasterError("Upload your resume on the Setup page first.")
     path = Path(path)
@@ -380,13 +410,20 @@ def load_master_with_sha(conn: sqlite3.Connection, path: Path | None) -> tuple[R
     if cached:
         return Resume.model_validate_json(cached), sha
     try:
-        resume = parse_master(path)
-        missing = verify(resume, _pdf_text(path))
-    except Exception as e:
-        raise MasterError(f"Couldn't read the master resume reliably ({path}): {short_error(e)}") from e
-    if missing:
-        shown = "; ".join(repr(m[:40]) for m in missing[:3])
-        raise MasterError(short_error(Exception(
-            f"Couldn't read the master resume reliably ({path}): {len(missing)} problems, e.g. {shown}")))
+        resume = _strict(path)
+    except MasterError as strict_error:
+        if client is None:
+            if settings is not None and not has_ai_key(settings):
+                raise MasterError(NO_KEY_MESSAGE) from strict_error
+            raise
+        from jobhunt.tailor import master_ai  # circular at import time
+
+        try:
+            resume = master_ai.parse_master_ai(path, client, settings)
+            problems = master_ai.verify_ai(resume, _pdf_text(path))
+        except Exception as e:
+            raise MasterError(UNRELIABLE_MESSAGE) from e
+        if problems:
+            raise MasterError(UNRELIABLE_MESSAGE)
     db.save_master_cache(conn, key, resume.model_dump_json())
     return resume, sha

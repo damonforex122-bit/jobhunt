@@ -17,6 +17,7 @@ _STEP = {
     "Matches": "matching the posting to your resume",
     "Draft": "writing the resume",
     "Verdicts": "checking the rewrites",
+    "ResumeRead": "reading your resume",
 }
 
 

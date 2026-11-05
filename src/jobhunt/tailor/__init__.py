@@ -169,7 +169,8 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
 
     try:
         step("Reading your master resume…")
-        master, master_sha = load_master_with_sha(conn, effective_master_path(conn, settings))
+        master, master_sha = load_master_with_sha(conn, effective_master_path(conn, settings),
+                                                 client=client, settings=settings)
         step("Reading the posting…")
         reqs = agents.read_posting(client, settings, posting, job["company"], job["title"])
         step("Matching it to your resume…")

@@ -26,12 +26,14 @@ from ..gmail.invites import local_tz
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..sources import by_link
-from ..tailor import tailor_job
+from ..tailor import agents, tailor_job
+from ..tailor.master_ai import preview_summary
 from ..tailor.master import MasterError, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
 from . import review
 
 MAX_MASTER_BYTES = 10 * 1024 * 1024
+SHA_RE = re.compile(r"[0-9a-f]{64}")
 KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
               "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa"}
 
@@ -374,6 +376,7 @@ def create_app(settings: Settings) -> FastAPI:
                      shell=bool(os.environ.get(f.upper()))) for f in KEY_FIELDS]
         return render(request, "profile.html",
                       master=profile_store.get_master(conn),
+                      pending=profile_store.get_pending_master(conn),
                       master_path=profile_store.effective_master_path(conn, settings),
                       links=profile_store.get_links(conn),
                       output_dir=profile_store.effective_output_dir(conn, settings),
@@ -443,6 +446,17 @@ def create_app(settings: Settings) -> FastAPI:
         reload_settings(settings)
         return to_profile("Keys updated.")
 
+    master_dir = settings.db_path.parent / "master"
+
+    def pending_file(sha: str) -> Path:
+        return master_dir / f".pending-{sha}.pdf"
+
+    def drop_pending(conn) -> None:
+        pending = profile_store.get_pending_master(conn)
+        if pending and SHA_RE.fullmatch(pending["info"].get("sha256", "")):
+            pending_file(pending["info"]["sha256"]).unlink(missing_ok=True)
+        profile_store.clear_pending_master(conn)
+
     @app.post("/profile/master")
     def post_profile_master(conn: Conn, file: Annotated[UploadFile, File()]):
         data = file.file.read(MAX_MASTER_BYTES + 1)
@@ -450,24 +464,54 @@ def create_app(settings: Settings) -> FastAPI:
             return to_profile("That file is over 10 MB.")
         if not data.startswith(b"%PDF-"):
             return to_profile("That file isn't a PDF.")
-        target_dir = settings.db_path.parent / "master"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        tmp = target_dir / f".upload-{secrets.token_hex(8)}.tmp"
+        master_dir.mkdir(parents=True, exist_ok=True)
+        tmp = master_dir / f".upload-{secrets.token_hex(8)}.tmp"
         tmp.write_bytes(data)
         try:
-            _, sha = load_master_with_sha(conn, tmp)
+            resume, sha = load_master_with_sha(conn, tmp, client=agents.make_client(settings),
+                                               settings=settings)
         except MasterError as e:
             tmp.unlink(missing_ok=True)
             return to_profile(str(e))
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
-        dest = target_dir / f"{sha}.pdf"
-        os.replace(tmp, dest)
-        profile_store.save_master(conn, profile_store.MasterInfo(
-            path=str(dest), sha256=sha, name=Path(file.filename or "master.pdf").name[:200],
-            uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        drop_pending(conn)  # only one upload waits for confirmation at a time
+        os.replace(tmp, pending_file(sha))
+        profile_store.save_pending_master(conn, profile_store.MasterInfo(
+            path=str(master_dir / f"{sha}.pdf"), sha256=sha,
+            name=Path(file.filename or "master.pdf").name[:200],
+            uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            preview_summary(resume))
+        return to_profile("Check how your resume was read, then use it.")
+
+    @app.get("/profile/master/preview", response_class=HTMLResponse)
+    def get_master_preview(request: Request, conn: Conn):
+        return render(request, "_master_preview.html",
+                      pending=profile_store.get_pending_master(conn))
+
+    @app.post("/profile/master/confirm")
+    def post_master_confirm(conn: Conn):
+        pending = profile_store.get_pending_master(conn)
+        if not pending:
+            return to_profile("There is no uploaded resume waiting.")
+        info = profile_store.MasterInfo(**pending["info"])
+        src = pending_file(info.sha256) if SHA_RE.fullmatch(info.sha256) else None
+        if src is None or not src.is_file() or master_sha256(src) != info.sha256:
+            drop_pending(conn)
+            return to_profile("That upload is gone. Please upload your resume again.")
+        dest = master_dir / f"{info.sha256}.pdf"
+        os.replace(src, dest)
+        info.path = str(dest)
+        info.uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        profile_store.save_master(conn, info)
+        profile_store.clear_pending_master(conn)
         return to_profile("Master resume saved.")
+
+    @app.post("/profile/master/cancel")
+    def post_master_cancel(conn: Conn):
+        drop_pending(conn)
+        return to_profile("Upload discarded. Choose another file.")
 
     review.register(app, settings, Conn, render, job_or_404)
     return app

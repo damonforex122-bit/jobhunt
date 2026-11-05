@@ -81,6 +81,20 @@ def save_master(conn: sqlite3.Connection, info: MasterInfo) -> None:
     put(conn, "master", info.model_dump())
 
 
+def get_pending_master(conn: sqlite3.Connection) -> dict | None:
+    """The uploaded-but-unconfirmed resume: {"info": MasterInfo dict, "summary": preview dict}."""
+    return get(conn, "pending_master") or None
+
+
+def save_pending_master(conn: sqlite3.Connection, info: MasterInfo, summary: dict) -> None:
+    put(conn, "pending_master", {"info": info.model_dump(), "summary": summary})
+
+
+def clear_pending_master(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM profile WHERE key = 'pending_master'")
+    conn.commit()
+
+
 def effective_master_path(conn: sqlite3.Connection, settings: Settings) -> Path | None:
     info = get_master(conn)
     return Path(info.path) if info else settings.master_resume_path

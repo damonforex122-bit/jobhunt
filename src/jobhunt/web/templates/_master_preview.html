@@ -1,0 +1,15 @@
+{% if pending %}{% set s = pending.summary %}
+<div class="alert alert-info flex-col items-start gap-2" id="master-preview">
+<p class="font-semibold">Here is how your resume was read. Does it look right?</p>
+<p><strong>{{ s.name }}</strong>{% if s.contact %} · {{ s.contact | join(" · ") }}{% endif %}{% if s.links %} · Links: {{ s.links | join(", ") }}{% endif %}</p>
+<ul class="list-disc pl-5">
+{% for r in s.roles %}<li>{{ r.org }}{% if r.title %}, {{ r.title }}{% endif %} ({{ r.bullets }} bullet{{ "" if r.bullets == 1 else "s" }})</li>
+{% else %}<li>No roles found</li>{% endfor %}
+</ul>
+<p>Skill categories: {{ s.skills | join(", ") if s.skills else "none" }} · Education entries: {{ s.education }}</p>
+<div class="flex gap-2">
+<form method="post" action="/profile/master/confirm"><button class="btn btn-primary">Use this resume</button></form>
+<form method="post" action="/profile/master/cancel"><button class="btn btn-ghost">Try another file</button></form>
+</div>
+</div>
+{% endif %}

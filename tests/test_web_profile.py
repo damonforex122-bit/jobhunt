@@ -135,6 +135,10 @@ def test_upload_valid_master_saves_under_data_and_activates(client, settings, tm
     r = client.post("/profile/master", files={"file": ("My Master.pdf", data, "application/pdf")},
                     follow_redirects=False)
     assert r.status_code == 303
+    conn = conn_for(settings)
+    assert profile_store.get_master(conn) is None  # not active until confirmed
+    conn.close()
+    assert client.post("/profile/master/confirm", follow_redirects=False).status_code == 303
     dest = settings.db_path.parent / "master" / f"{sha}.pdf"
     assert dest.read_bytes() == data
     assert list(dest.parent.glob("*")) == [dest]
@@ -151,13 +155,14 @@ def test_upload_invalid_pdf_rejected_keeps_old_master(client, settings, tmp_path
     src = tmp_path / "m.pdf"
     render_master_layout(sample_resume(), src)
     client.post("/profile/master", files={"file": ("a.pdf", src.read_bytes(), "application/pdf")})
+    client.post("/profile/master/confirm")
     conn = conn_for(settings)
     before = profile_store.get_master(conn)
     conn.close()
     bad = make_pdf(tmp_path / "bad.pdf", "arbitrary text")
     r = client.post("/profile/master", files={"file": ("bad.pdf", bad.read_bytes(), "application/pdf")},
                     follow_redirects=False)
-    assert "Couldn't read" in msg_of(r)
+    assert "Add an AI key" in msg_of(r)
     conn = conn_for(settings)
     assert profile_store.get_master(conn) == before
     conn.close()
