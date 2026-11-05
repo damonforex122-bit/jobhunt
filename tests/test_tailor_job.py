@@ -294,3 +294,33 @@ def test_tailor_cli_error_returns_1(tmp_path, settings, monkeypatch, capsys):
     conn.close()
     assert cli.main(["tailor", str(j)]) == 1
     assert "Not tailored: No posting text" in capsys.readouterr().out
+
+
+STEPS = ["Reading your master resume…", "Reading the posting…", "Matching it to your resume…",
+         "Writing the tailored version…", "Checking every rewrite against your master…",
+         "Laying out the PDF…"]
+
+
+def test_progress_reports_each_step_in_order(conn, settings):
+    seen = []
+    r = tailor_job(conn, add_job(conn), settings, client=fake(), progress=seen.append)
+    assert r.error is None and seen == STEPS
+
+
+def test_progress_stops_at_the_failing_step(conn, settings):
+    from jobhunt.tailor.agents import Draft
+    seen = []
+    r = tailor_job(conn, add_job(conn), settings, client=fake(raise_on=Draft, exc=ValueError("x")),
+                   progress=seen.append)
+    assert r.error.startswith("Writing the resume failed") and seen == STEPS[:4]
+
+
+def test_tailor_cli_prints_progress(tmp_path, settings, monkeypatch, capsys):
+    monkeypatch.setattr("jobhunt.config.load_settings", lambda: settings)
+    monkeypatch.setattr(tailor_mod.agents, "make_client", lambda s: fake())
+    conn = db.connect(settings.db_path)
+    j = add_job(conn)
+    conn.close()
+    assert cli.main(["tailor", str(j)]) == 0
+    out = capsys.readouterr().out
+    assert all(step in out for step in STEPS) and out.index(STEPS[-1]) < out.index("Saved: ")

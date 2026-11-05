@@ -88,16 +88,20 @@ class FakeGemini:
     """Stand-in for genai.Client: returns a canned parsed object per response schema."""
 
     def __init__(self, responses: dict | None = None, exc: Exception | None = None,
-                 raise_on: type | None = None):
+                 raise_on: type | None = None, fail_times: int | None = None):
         self.responses = responses or {}
         self.exc = exc
         self.raise_on = raise_on
+        self.fail_times = fail_times  # raise `exc` only on the first N matching calls
         self.calls: list[dict] = []
         self.models = self
 
     def generate_content(self, **kw):
         self.calls.append(kw)
         if self.exc and (self.raise_on is None or kw["config"]["response_schema"] is self.raise_on):
-            raise self.exc
+            if self.fail_times is None or self.fail_times > 0:
+                if self.fail_times is not None:
+                    self.fail_times -= 1
+                raise self.exc
         parsed = self.responses.get(kw["config"]["response_schema"])
         return type("R", (), {"parsed": parsed})()

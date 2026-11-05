@@ -1,6 +1,7 @@
 """Tailor the master resume to a job posting."""
 
 import sqlite3
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -36,7 +37,10 @@ def _fail(conn: sqlite3.Connection, job_id: int, message: str) -> TailorResult:
                         fallbacks=old.get("fallbacks", []), error=message)
 
 
-def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=None) -> TailorResult:
+def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client=None,
+               progress: Callable[[str], None] | None = None) -> TailorResult:
+    """`progress` is told each step as it starts (the CLI prints them; runs take about a minute)."""
+    step = progress or (lambda _msg: None)
     job = db.get_job(conn, job_id)
     if job is None:
         raise ValueError(f"No job with id {job_id}")
@@ -49,10 +53,15 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         client = agents.make_client(settings)
 
     try:
+        step("Reading your master resume…")
         master, master_sha = load_master_with_sha(conn, settings.master_resume_path)
+        step("Reading the posting…")
         reqs = agents.read_posting(client, settings, posting, job["company"], job["title"])
+        step("Matching it to your resume…")
         matches = agents.match(client, settings, master, reqs)
+        step("Writing the tailored version…")
         draft = agents.write(client, settings, master, reqs, matches)
+        step("Checking every rewrite against your master…")
         judge_fn = partial(agents.judge, client, settings)
         resume, ranking, fallbacks = assemble(draft, master, judge_fn)
 
@@ -66,6 +75,7 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         folder = company_folder(settings.resume_output_dir, job["company"])
         dest = choose_path(folder, job["title"], owned)
         fitted: dict = {}
+        step("Laying out the PDF…")
 
         def render(tmp: Path) -> None:
             fitted["resume"], fitted["cut"], fitted["pages"] = fit_to_pages(resume, ranking, tmp)
@@ -102,7 +112,8 @@ def register(sub) -> None:
         settings = load_settings()
         conn = db.connect(settings.db_path)
         try:
-            result = tailor_job(conn, args.job_id, settings)
+            result = tailor_job(conn, args.job_id, settings,
+                                progress=lambda msg: print(msg, flush=True))
         except ValueError as exc:
             print(exc)
             return 1

@@ -1,5 +1,6 @@
 """Gemini agents: read the posting, match it to the master, write a draft, judge the rewrites."""
 import json
+import time
 from typing import Literal
 
 from pydantic import BaseModel
@@ -7,6 +8,19 @@ from pydantic import BaseModel
 from ..config import Settings
 from ..fit.gemini import _short_error
 from .model import Resume
+
+CALL_TIMEOUT_S = 90  # one Gemini call; without a limit a stalled reply hangs the run forever
+RETRIES = 1  # extra attempts after a timeout or an overloaded / rate-limited reply
+RETRY_DELAY_S = 3
+_sleep = time.sleep
+
+# What the user is told each call was doing when it failed.
+_STEP = {
+    "Requirements": "reading the posting",
+    "Matches": "matching the posting to your resume",
+    "Draft": "writing the resume",
+    "Verdicts": "checking the rewrites",
+}
 
 
 class Requirement(BaseModel):
@@ -68,25 +82,46 @@ class AgentError(Exception):
 def make_client(settings: Settings):
     from google import genai
 
-    return genai.Client(api_key=settings.gemini_api_key)
+    from google.genai import types
+
+    return genai.Client(api_key=settings.gemini_api_key,
+                        http_options=types.HttpOptions(timeout=CALL_TIMEOUT_S * 1000))
+
+
+def _is_timeout(exc: Exception) -> bool:
+    return any("Timeout" in t.__name__ for t in type(exc).__mro__)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Worth one more try: a timeout, an overloaded server, or a rate limit."""
+    code = getattr(exc, "code", None)
+    return _is_timeout(exc) or code in (429, 500, 502, 503, 504)
 
 
 def _call(client, settings: Settings, prompt: str, schema: type[BaseModel]):
-    try:
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": schema,
-                "temperature": 0.2,
-            },
-        )
-        parsed = response.parsed
-    except Exception as exc:
-        raise AgentError(_short_error(exc, settings)) from exc
+    step = _STEP.get(schema.__name__, "calling Gemini")
+    for attempt in range(RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": schema,
+                    "temperature": 0.2,
+                },
+            )
+            parsed = response.parsed
+            break
+        except Exception as exc:
+            if _is_transient(exc) and attempt < RETRIES:
+                _sleep(RETRY_DELAY_S)
+                continue
+            if _is_timeout(exc):
+                raise AgentError(f"Gemini didn't answer within {CALL_TIMEOUT_S}s while {step}") from exc
+            raise AgentError(f"{step.capitalize()} failed: {_short_error(exc, settings)}") from exc
     if not isinstance(parsed, schema):
-        raise AgentError(f"Gemini returned no valid {schema.__name__}")
+        raise AgentError(f"Gemini returned no valid {schema.__name__} while {step}")
     return parsed
 
 
