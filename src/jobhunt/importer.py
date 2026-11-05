@@ -71,7 +71,8 @@ def parse_job_history(text: str) -> list[ImportedJob]:
         reason = None
         ri = columns.get("reason")
         if ri is not None and ri < len(cells):
-            reason = "|".join(cells[ri:]).replace("\\|", "|").strip() or None
+            extra = max(0, len(cells) - len(columns))  # cells split off by unescaped pipes inside the reason
+            reason = "|".join(cells[ri : ri + 1 + extra]).replace("\\|", "|").strip() or None
         job = Job(
             company=company,
             title=title,
@@ -181,11 +182,11 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, in
                     counts["unknown_status"] += 1
             else:
                 kind, target = mapped
-                if kind == "triage" and cur["status"] == "new" and target != "new":
+                if kind == "triage" and cur["status"] == "new":
                     set_job_status(conn, job_id, target, source="proficiently")
                     counts["moved"] += 1
                 elif kind == "forward" and cur["status"] in OPEN_STATUSES:
-                    set_job_status(conn, job_id, target, f"From Proficiently ({item.date})",
+                    set_job_status(conn, job_id, target, f"From Proficiently ({item.date})" if item.date else "From Proficiently",
                                    source="proficiently")
                     counts["moved"] += 1
             if changed and not is_new:

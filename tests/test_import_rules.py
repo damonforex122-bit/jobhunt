@@ -105,6 +105,8 @@ def test_reads_history_add_and_varied_columns(conn, tmp_path):
     assert status(conn, 2) == "low"
     assert status(conn, 1) == "needs"  # later row (_history-add.md) wins
     assert db.get_job(conn, jid(conn, 1))["prof_score"] == 9
+    assert db.get_job(conn, jid(conn, 1))["prof_reason"] == "reason 1"
+    assert db.get_job(conn, jid(conn, 2))["prof_reason"] == "reason 2"
 
 
 def test_posting_only_fills_empty_description(conn, tmp_path):
@@ -142,3 +144,30 @@ def test_import_writes_run_row(conn, tmp_path):
     assert len(r) == 1 and r[0]["finished_at"] and r[0]["error"] is None
     assert json.loads(r[0]["counts_json"]) == c
     assert r[0]["path"] == str(root)
+
+
+def test_reason_with_literal_pipe_as_last_column_kept_whole(conn, tmp_path):
+    root = tmp_path / "p"
+    root.mkdir()
+    (root / "job-history.md").write_text(
+        "| Company | Role | Score | Job URL | Date | Status | Reason |\n|---|---|---|---|---|---|---|\n"
+        f"| Acme1 | Role 1 | 7 | {H}1 | 2026-10-30 | ready | good | fit | here |\n"
+    )
+    run_import(conn, root)
+    assert db.get_job(conn, jid(conn, 1))["prof_reason"] == "good|fit|here"
+
+
+def test_import_keeps_scan_source(conn, tmp_path):
+    from jobhunt.models import Job
+
+    db.upsert_job(conn, Job(company="Acme1", title="Role 1", url=f"{H}1", source="scan"))
+    run_import(conn, make_proficiently(tmp_path / "p", history_rows=[row(1)]))
+    assert db.get_job(conn, jid(conn, 1))["source"] == "scan"
+
+
+def test_blank_date_note_has_no_parens(conn, tmp_path):
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1, "applied", Date="")])
+    run_import(conn, root)
+    ev = conn.execute("SELECT note FROM job_events WHERE job_id = ? ORDER BY id DESC",
+                      (jid(conn, 1),)).fetchone()
+    assert ev["note"] == "From Proficiently"

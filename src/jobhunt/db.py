@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS job_materials (
 
 _JOB_UPDATE_FIELDS = (
     "company", "title", "location", "salary_min", "salary_max",
-    "description", "source", "posted_at",
+    "description", "posted_at",
 )
 
 
