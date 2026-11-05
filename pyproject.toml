@@ -14,6 +14,7 @@ dependencies = [
     "google-genai",
     "python-multipart",
     "google-auth-oauthlib>=1.5.0",
+    "reportlab>=5.1.0",
 ]
 
 [project.scripts]
