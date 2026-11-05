@@ -216,10 +216,10 @@ def _ends_experience(k, sec_lines, owners, line_text, is_heading) -> bool:
     string covers, or the first line of another section's text. Not the last: a bullet line (the same
     list carries on) or a section whose text runs on past an unclaimed heading (it started too early)."""
     text = line_text(k)
-    if is_heading(text) or (2 not in owners.get(k, set()) and _looks_like_heading(text)):
-        return True
     if _is_marker_line(text):
         return False
+    if is_heading(text) or (2 not in owners.get(k, set()) and _looks_like_heading(text)):
+        return True
     for si, lines in sec_lines.items():
         if si != 2 and min(lines) == k:
             if not any(is_heading(line_text(h)) and not owners.get(h) for h in range(k + 1, max(lines) + 1)):
@@ -383,8 +383,9 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
 
     ignorable = [False] * len(hay)
     def heads_a_section(n: int) -> bool:  # an unread "Skills:" right above the skills it heads
-        nxt = owners.get(n + 1, set())
-        return not owners.get(n) and _looks_like_heading(line_text(n)) and bool(nxt) and 2 not in nxt
+        nxt, t = owners.get(n + 1, set()), " ".join(line_text(n).split())
+        short = len(t) <= 25 and not any(c.isdigit() for c in t) and (t.isupper() or t.istitle())
+        return not owners.get(n) and short and _looks_like_heading(t) and bool(nxt) and 2 not in nxt
 
     for n in range(len(spans)):  # headings are not content
         if _is_heading(line_text(n)) or heads_a_section(n):
@@ -397,17 +398,17 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
     ratio = sum(c for _, c in content) / len(content)
     if ratio < COVERAGE_MIN:
         return [f"left out {round((1 - ratio) * 100)}% of your resume"], []
-    left: list[str] = []  # runs of consecutive lines the read skipped, if substantial
+    left: list[str] = []  # runs of consecutive lines the read skipped: every one is shown to the user
     run: list[str] = []
 
     def flush() -> None:
-        if sum(len(r) for r in run) > 20:
+        if run:
             left.append(" / ".join(run)[:160])
         run.clear()
 
     for n in range(len(spans)):
         line = line_text(n).strip()
-        if uncovered(n) and not _is_heading(line):
+        if len(uncovered(n)) > 3 and not _is_heading(line):
             run.append(line)
         else:
             flush()

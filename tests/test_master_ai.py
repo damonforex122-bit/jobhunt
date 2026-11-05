@@ -532,6 +532,31 @@ def test_last_bullet_moved_to_publications_with_no_heading_after_is_rejected(tmp
     assert verdict(plain(experience=[role("Acme", [first])], publications=[last]), text)
 
 
+def test_title_case_last_marker_bullet_moved_to_publications_is_rejected(tmp_path):
+    first = "Built the first billing pipeline for the team."
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020", "- " + first,
+         "- Led Platform Migration", "Languages: Python, Go"]
+    text = lines_pdf(tmp_path / "t.pdf", g)
+    sk = [SkillRead(name="Languages", items=["Python", "Go"])]
+    assert verdict(plain(experience=[role("Acme", [first, "Led Platform Migration"])], skills=sk), text) == []
+    assert verdict(plain(experience=[role("Acme", [first])], publications=["Led Platform Migration"], skills=sk), text)
+
+
+@pytest.mark.parametrize("dropped, after, read_kw", [
+    ("Go Rust Zig", ["Skills", "Go Rust Zig", "Languages: Python, Go"],
+     dict(skills=[SkillRead(name="Languages", items=["Python", "Go"])])),
+    ("BS Computer Science", ["Education", "State University", "BS Computer Science", "2015 - 2019"],
+     dict(education=[EducationRead(school="State University", detail="", dates="2015 - 2019")])),
+])
+def test_a_short_dropped_line_is_always_listed_as_left_out(tmp_path, dropped, after, read_kw):
+    bullets = [f"Delivered project number {i} with measurable impact across several teams." for i in range(12)]
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020", *("- " + b for b in bullets),
+         *after]
+    text = lines_pdf(tmp_path / "d.pdf", g)
+    problems, left = verify_ai_full(to_resume(plain(experience=[role("Acme", bullets)], **read_kw), []), text)
+    assert problems == [] and any(dropped in x for x in left)
+
+
 def test_a_summary_never_sits_on_a_bullet_line(tmp_path):
     text = lines_pdf(tmp_path / "s.pdf", ["Pat Lee", "pat@example.com", "- Built the first billing pipeline for the team."])
     assert verdict(plain(summary="Built the first billing pipeline for the team."), text)
