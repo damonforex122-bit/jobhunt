@@ -17,6 +17,9 @@
   {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>{% endfor %}</select>
   <label class="flex items-center gap-1">min score <input name="min_score" size="3" value="{{ min_score }}" class="input input-bordered w-20"></label>
   <label class="flex items-center gap-1">company <input name="company" value="{{ company }}" class="input input-bordered"></label>
+  <select name="source" class="select select-bordered"><option value="">any source</option>
+  {% for s in sources %}<option value="{{ s }}" {{ 'selected' if s == source }}>{{ s }}</option>{% endfor %}</select>
+  <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" name="new" value="today" class="checkbox" {{ 'checked' if new == 'today' }}> New today</label>
   <button class="btn btn-primary">Filter</button>
 </form>
 <div class="overflow-x-auto" id="jobs-table" data-refresh-on-focus="#jobs-table"><table class="table table-zebra"><thead><tr><th>Company</th><th>Title</th><th>Location</th><th>Flags</th><th>Score</th><th>Keyword %</th><th>Status</th><th>First seen</th></tr></thead><tbody>

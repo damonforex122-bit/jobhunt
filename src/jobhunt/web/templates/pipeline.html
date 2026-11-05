@@ -1,6 +1,12 @@
 {% extends "base.html" %}{% block body %}
 <h1 class="text-2xl font-bold">Pipeline</h1>
 <p class="text-sm opacity-60">Drag cards between stages, change a status from the Jobs list, or run <code>jobhunt status &lt;id&gt; applied</code>.</p>
+<div id="today-strip" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+  {% set n = today.new_by_source.values() | sum %}
+  <span class="font-semibold">Today: {{ n }} new{% if n %} ({% for k, v in today.new_by_source.items() %}{{ k | capitalize }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}){% endif %} · {{ today.moved }} moved · {{ today.interviews_upcoming }} interviews upcoming</span>
+  {% if today.digest_run_id %}<a class="link link-primary text-sm" href="/digests/{{ today.digest_run_id }}">Today's digest</a>{% endif %}
+  {% if last_run %}<span class="text-sm opacity-60">Last morning run {{ last_run.at.strftime('%H:%M') }} {{ '✓' if last_run.ok else '✗' }}</span>{% endif %}
+</div>
 <h2 class="text-xl font-semibold">Suggested from Gmail</h2>
 <div class="flex items-center gap-2">
 <form method="post" action="/gmail/sync"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>

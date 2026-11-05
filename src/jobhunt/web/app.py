@@ -36,6 +36,8 @@ MAX_MASTER_BYTES = 10 * 1024 * 1024
 KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
               "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa"}
 
+JOB_SOURCES = ("proficiently", "scan", "link", "gmail")
+
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
@@ -179,15 +181,18 @@ def create_app(settings: Settings) -> FastAPI:
                     **extra)
 
     def jobs_page(request: Request, conn, status: str = "", min_score: str = "",
-                  company: str = "", **extra) -> HTMLResponse:
+                  company: str = "", new: str = "", source: str = "", **extra) -> HTMLResponse:
         jobs = db.list_jobs(
             conn,
             status=status or None,
             min_score=int(min_score) if min_score.strip().isdigit() else None,
             company=company or None,
+            source=source if source in JOB_SOURCES else None,
+            added_on=datetime.now().astimezone().date() if new == "today" else None,
         )
         return render(request, "jobs.html", jobs=jobs, statuses=STATUSES, status=status,
-                      min_score=min_score, company=company,
+                      min_score=min_score, company=company, new=new, source=source,
+                      sources=JOB_SOURCES,
                       final_ids=db.final_job_ids(conn),
                       **{"add_url": "", "add_needs_text": False, "add_error": None, **extra})
 
@@ -198,8 +203,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
-              company: str = ""):
-        return jobs_page(request, conn, status, min_score, company)
+              company: str = "", new: str = "", source: str = ""):
+        return jobs_page(request, conn, status, min_score, company, new, source)
 
     @app.post("/jobs/add", response_class=HTMLResponse)
     def post_add_job(request: Request, conn: Conn,
@@ -336,7 +341,10 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/pipeline", response_class=HTMLResponse)
     def pipeline_page(request: Request, conn: Conn):
+        today = datetime.now().astimezone().date()
+        summary = db.today_summary(conn, today)
         return render(request, "pipeline.html", board=db.pipeline_board(conn),
+                      today=summary, last_run=db.last_morning_run(conn),
                       pipeline=PIPELINE, closed=CLOSED,
                       suggestions=db.list_gmail_suggestions(conn),
                       gmail_connected=settings.gmail_token.exists(),

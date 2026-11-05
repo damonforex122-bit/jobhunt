@@ -125,6 +125,17 @@ _JOB_UPDATE_FIELDS = (
 )
 
 
+def _local_date(iso: str | None, tz=None) -> date | None:
+    """The local calendar date of a stored timestamp (naive means UTC); None when unparseable."""
+    try:
+        dt = datetime.fromisoformat(iso or "")
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).date()
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -263,8 +274,14 @@ def list_jobs(
     status: str | None = None,
     min_score: int | None = None,
     company: str | None = None,
+    source: str | None = None,
+    added_on: date | None = None,
+    tz=None,
 ) -> list[dict]:
     where, args = [], []
+    if source is not None:
+        where.append("j.source = ?")
+        args.append(source)
     if status is not None:
         where.append("j.status = ?")
         args.append(status)
@@ -282,7 +299,10 @@ def list_jobs(
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY COALESCE(f.llm_score, j.prof_score) DESC, j.id DESC"
-    return [_job_row(r) for r in conn.execute(sql, args).fetchall()]
+    rows = [_job_row(r) for r in conn.execute(sql, args).fetchall()]
+    if added_on is not None:
+        rows = [r for r in rows if _local_date(r.get("added_at"), tz) == added_on]
+    return rows
 
 
 # --- fits ------------------------------------------------------------------
@@ -615,16 +635,45 @@ def last_runs(conn: sqlite3.Connection) -> dict[str, dict]:
     return {r["kind"]: _run_row(r) for r in rows}
 
 
-def runs_on(conn: sqlite3.Connection, local_date: date) -> list[dict]:
+def runs_on(conn: sqlite3.Connection, local_date: date, tz=None) -> list[dict]:
     """Runs that started on the given local calendar date, oldest first."""
-    out = []
-    for r in conn.execute("SELECT * FROM runs ORDER BY id").fetchall():
-        started = datetime.fromisoformat(r["started_at"])
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-        if started.astimezone().date() == local_date:
-            out.append(_run_row(r))
-    return out
+    return [_run_row(r) for r in conn.execute("SELECT * FROM runs ORDER BY id").fetchall()
+            if _local_date(r["started_at"], tz) == local_date]
+
+
+def today_summary(conn: sqlite3.Connection, today: date, tz=None) -> dict:
+    """What happened on `today` (local): new jobs by source, pipeline/closed moves, upcoming
+    interviews, today's digest run id and the last run of each kind."""
+    new_by_source: dict[str, int] = {}
+    for j in list_jobs(conn, added_on=today, tz=tz):
+        k = j.get("source") or "other"
+        new_by_source[k] = new_by_source.get(k, 0) + 1
+    new_by_source = dict(sorted(new_by_source.items(), key=lambda kv: (-kv[1], kv[0])))
+    moved = sum(1 for e in conn.execute("SELECT status, at FROM job_events").fetchall()
+                if e["status"] in PIPELINE + CLOSED and _local_date(e["at"], tz) == today)
+    digest_id = None
+    for r in conn.execute("SELECT id, path FROM runs WHERE kind = 'digest' ORDER BY id"):
+        if Path(r["path"] or "").stem == today.isoformat():
+            digest_id = r["id"]
+    return {"new_by_source": new_by_source, "moved": moved,
+            "interviews_upcoming": len(list_interviews(conn, now=_now())),
+            "digest_run_id": digest_id, "last_runs": last_runs(conn)}
+
+
+def last_morning_run(conn: sqlite3.Connection, tz=None) -> dict | None:
+    """{'at': datetime, 'ok': bool} for the newest run's local day, or None when nothing ran.
+    A step error that starts with 'skipped: ' is not a failure."""
+    runs = last_runs(conn).values()
+    if not runs:
+        return None
+    newest = max(runs, key=lambda r: r["started_at"])
+    day = _local_date(newest["started_at"], tz)
+    steps = runs_on(conn, day, tz)
+    ok = all(not r["error"] or r["error"].startswith("skipped: ") for r in steps)
+    at = datetime.fromisoformat(newest["started_at"])
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return {"at": at.astimezone(tz), "ok": ok}
 
 
 # --- job materials ---------------------------------------------------------
