@@ -12,9 +12,11 @@ from ..fit.gemini import _short_error
 from . import agents
 from .agents import AgentError
 from .check import assemble
-from .master import MasterError, load_master, master_sha256
-from .output import choose_path, company_folder, write_atomic
+from .master import MasterError, load_master_with_sha
+from .output import choose_path, company_folder, file_sha256, reusable_owned, write_atomic
 from .render import fit_to_pages
+
+MAX_PAGES = 2
 
 
 class TailorResult(BaseModel):
@@ -47,35 +49,46 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
         client = agents.make_client(settings)
 
     try:
-        master = load_master(conn, settings.master_resume_path)
+        master, master_sha = load_master_with_sha(conn, settings.master_resume_path)
         reqs = agents.read_posting(client, settings, posting, job["company"], job["title"])
         matches = agents.match(client, settings, master, reqs)
         draft = agents.write(client, settings, master, reqs, matches)
         judge_fn = partial(agents.judge, client, settings)
         resume, ranking, fallbacks = assemble(draft, master, judge_fn)
 
-        supported = {m.requirement_id for m in matches.matches if m.evidence_ids}
-        gaps = [r.text for r in reqs.requirements if r.id not in supported]
+        _, gap_reqs = agents.supported_requirements(master, reqs.requirements, matches)
+        gaps = [r.text for r in gap_reqs]
 
         old = db.get_resume(conn, job_id)
         owned = Path(old["path"]) if old and old.get("path") else None
+        owned = reusable_owned(owned, old.get("file_sha256") if old else None,
+                               db.resume_paths(conn, exclude_job=job_id), settings.resume_output_dir)
         folder = company_folder(settings.resume_output_dir, job["company"])
         dest = choose_path(folder, job["title"], owned)
         fitted: dict = {}
 
         def render(tmp: Path) -> None:
-            fitted["resume"], fitted["cut"] = fit_to_pages(resume, ranking, tmp)
+            fitted["resume"], fitted["cut"], fitted["pages"] = fit_to_pages(resume, ranking, tmp)
+            fitted["sha"] = file_sha256(tmp)
 
         write_atomic(render, dest)
-        sha = master_sha256(settings.master_resume_path)
+        written = dest  # from here the PDF exists; only recording it can still fail
+        if fitted["pages"] > MAX_PAGES:
+            fallbacks = [*fallbacks, f"Couldn't fit in {MAX_PAGES} pages: {fitted['pages']} pages"]
+        try:
+            db.save_resume(conn, {"job_id": job_id, "path": str(written), "master_sha256": master_sha,
+                                  "file_sha256": fitted["sha"], "gaps": gaps, "fallbacks": fallbacks,
+                                  "error": None})
+        except Exception as exc:
+            message = f"PDF saved to {written} but couldn't record it: {_short_error(exc, settings)}"
+            return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
+                                cut=fitted["cut"], error=message)
     except (MasterError, AgentError) as exc:
         return _fail(conn, job_id, str(exc))
     except Exception as exc:  # never crash the caller (or a web request) on a rendering/agent bug
         return _fail(conn, job_id, _short_error(exc, settings))
 
-    db.save_resume(conn, {"job_id": job_id, "path": str(dest), "master_sha256": sha,
-                          "gaps": gaps, "fallbacks": fallbacks, "error": None})
-    return TailorResult(job_id=job_id, path=str(dest), gaps=gaps, fallbacks=fallbacks,
+    return TailorResult(job_id=job_id, path=str(written), gaps=gaps, fallbacks=fallbacks,
                         cut=fitted["cut"])
 
 

@@ -201,16 +201,16 @@ def render_pdf(resume: Resume, out: Path) -> int:
     return doc.page
 
 
-def fit_to_pages(resume: Resume, ranking: list[str], out: Path, max_pages: int = 2) -> tuple[Resume, list[str]]:
+def fit_to_pages(resume: Resume, ranking: list[str], out: Path, max_pages: int = 2) -> tuple[Resume, list[str], int]:
     """Cut the lowest-ranked bullets (never an entry's last one) until the PDF fits `max_pages`.
 
-    `ranking` lists bullet IDs best first. Returns the fitted resume and the IDs it cut; the
-    fitted PDF is left at `out`.
+    `ranking` lists bullet IDs best first. Returns the fitted resume, the IDs it cut and the final
+    page count (above `max_pages` when nothing more could be cut); the fitted PDF is left at `out`.
     """
     current = resume.model_copy(deep=True)
     cut: list[str] = []
     order = list(ranking) + [b for b in current.all_bullets() if b not in ranking]
-    while render_pdf(current, out) > max_pages:
+    while (pages := render_pdf(current, out)) > max_pages:
         counts = {e.id: len(e.bullets) for e in current.experience}
         owner = {b.id: e.id for e in current.experience for b in e.bullets}
         victim = next((b for b in reversed(order) if b in owner and counts[owner[b]] > 1), None)
@@ -219,4 +219,4 @@ def fit_to_pages(resume: Resume, ranking: list[str], out: Path, max_pages: int =
         for e in current.experience:
             e.bullets = [b for b in e.bullets if b.id != victim]
         cut.append(victim)
-    return current, cut
+    return current, cut, pages

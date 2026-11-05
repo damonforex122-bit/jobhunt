@@ -13,7 +13,8 @@ def tc(app):
 
 @pytest.fixture
 def settings(tmp_path):
-    s = Settings(db_path=tmp_path / "web.db", proficiently_dir=tmp_path / "prof")
+    s = Settings(db_path=tmp_path / "web.db", proficiently_dir=tmp_path / "prof",
+                 master_resume_path=tmp_path / "master.pdf", resume_output_dir=tmp_path / "out")
     conn = db.connect(s.db_path)
     a, _ = db.upsert_job(conn, Job(company="AfterQuery", title="Evals Lead", url="https://x.test/a",
                                    description="Build <b>evals</b> & benchmarks", source="ats",

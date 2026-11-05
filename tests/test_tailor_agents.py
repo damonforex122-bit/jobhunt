@@ -116,3 +116,33 @@ def test_agent_error_masks_key():
     with pytest.raises(AgentError) as ei:
         agents.judge(client, settings(key=SECRET), [("a", ["b"])])
     assert SECRET not in str(ei.value) and "***" in str(ei.value)
+
+
+def test_supported_requirements_validates_ids_and_last_match_wins():
+    resume = sample_resume()
+    rs = reqs()
+    ok = Matches(matches=[Match(requirement_id="r0", evidence_ids=["e9b9"]),
+                          Match(requirement_id="zz", evidence_ids=["e0b0"]),
+                          Match(requirement_id="r1", evidence_ids=["e0b0"])])
+    supported, gaps = agents.supported_requirements(resume, rs.requirements, ok)
+    assert [r.id for r in supported] == ["r1"] and [r.id for r in gaps] == ["r0"]
+    dup = Matches(matches=[Match(requirement_id="r1", evidence_ids=["e0b0"]),
+                           Match(requirement_id="r1", evidence_ids=[])])
+    supported, gaps = agents.supported_requirements(resume, rs.requirements, dup)
+    assert supported == [] and len(gaps) == 2
+    kinds = Matches(matches=[Match(requirement_id="r0", evidence_ids=["summary"]),
+                             Match(requirement_id="r1", evidence_ids=["s0:python"])])
+    supported, _ = agents.supported_requirements(resume, rs.requirements, kinds)
+    assert [r.id for r in supported] == ["r0", "r1"]
+    bad_skill = Matches(matches=[Match(requirement_id="r0", evidence_ids=["s0:Rust", "s7:Python"])])
+    assert agents.supported_requirements(resume, rs.requirements, bad_skill)[0] == []
+
+
+def test_writer_keeps_hallucinated_evidence_out_of_supported_block():
+    client = FakeGemini(all_responses())
+    bad = Matches(matches=[Match(requirement_id="r0", evidence_ids=["e9b9"]),
+                           Match(requirement_id="r1", evidence_ids=["e0b0"])])
+    agents.write(client, settings(), sample_resume(), reqs(), bad)
+    p = client.calls[0]["contents"]
+    gaps_at = p.index("Gaps (do not write about these)")
+    assert MUST not in p[:gaps_at] and MUST in p[gaps_at:]

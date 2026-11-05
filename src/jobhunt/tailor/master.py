@@ -364,21 +364,27 @@ def master_sha256(path: Path) -> str:
 
 def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
     """The parsed master, from the cache when the file is unchanged. Raises MasterError."""
+    return load_master_with_sha(conn, path)[0]
+
+
+def load_master_with_sha(conn: sqlite3.Connection, path: Path) -> tuple[Resume, str]:
+    """Like `load_master`, plus the file hash the cache was keyed on."""
     path = Path(path)
     if not path.is_file():
         raise MasterError(f"Master resume not found: {path}")
-    key = f"{master_sha256(path)}:v{PARSER_VERSION}"
+    sha = master_sha256(path)
+    key = f"{sha}:v{PARSER_VERSION}"
     cached = db.get_master_cache(conn, key)
     if cached:
-        return Resume.model_validate_json(cached)
+        return Resume.model_validate_json(cached), sha
     try:
         resume = parse_master(path)
         missing = verify(resume, _pdf_text(path))
     except Exception as e:
-        raise MasterError(f"Couldn't read the master resume reliably: {short_error(e)}") from e
+        raise MasterError(f"Couldn't read the master resume reliably ({path}): {short_error(e)}") from e
     if missing:
         shown = "; ".join(repr(m[:40]) for m in missing[:3])
         raise MasterError(short_error(Exception(
-            f"Couldn't read the master resume reliably: {len(missing)} problems, e.g. {shown}")))
+            f"Couldn't read the master resume reliably ({path}): {len(missing)} problems, e.g. {shown}")))
     db.save_master_cache(conn, key, resume.model_dump_json())
-    return resume
+    return resume, sha

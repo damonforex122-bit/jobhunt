@@ -151,15 +151,35 @@ Return exactly one match per requirement, using its requirement_id.
     return _call(client, settings, prompt, Matches)
 
 
+def _valid_evidence(resume: Resume, ids: list[str]) -> list[str]:
+    bullets = resume.all_bullets()
+    skills = {s.id: {i.casefold() for i in s.items} for s in resume.skills}
+    out = []
+    for i in ids:
+        cat, sep, item = i.partition(":")
+        if i in bullets or i == "summary" or (sep and item.casefold() in skills.get(cat, ())):
+            out.append(i)
+    return out
+
+
+def _evidence(resume: Resume, matches: Matches) -> dict[str, list[str]]:
+    """Valid evidence ids per requirement id; the last match per requirement wins."""
+    last = {m.requirement_id: m.evidence_ids for m in matches.matches}
+    return {rid: _valid_evidence(resume, ids) for rid, ids in last.items()}
+
+
+def supported_requirements(resume: Resume, reqs: list[Requirement], matches: Matches
+                           ) -> tuple[list[Requirement], list[Requirement]]:
+    """(supported, gaps). Only real evidence ids count, and matches for unknown requirements are ignored."""
+    evidence = _evidence(resume, matches)
+    return ([r for r in reqs if evidence.get(r.id)], [r for r in reqs if not evidence.get(r.id)])
+
+
 def write(client, settings: Settings, resume: Resume, reqs: Requirements, matches: Matches) -> Draft:
-    evidence = {m.requirement_id: m.evidence_ids for m in matches.matches}
-    supported, gaps = [], []
-    for r in reqs.requirements:
-        ids = evidence.get(r.id) or []
-        if ids:
-            supported.append({**r.model_dump(), "evidence_ids": ids})
-        else:
-            gaps.append(r.text)
+    evidence = _evidence(resume, matches)
+    sup, gap_reqs = supported_requirements(resume, reqs.requirements, matches)
+    supported = [{**r.model_dump(), "evidence_ids": evidence[r.id]} for r in sup]
+    gaps = [r.text for r in gap_reqs]
     supported_json = json.dumps(supported, indent=1, ensure_ascii=False)
     gap_lines = "\n".join(f"- {g}" for g in gaps) or "- (none)"
     prompt = f"""You tailor a candidate's resume to a job posting by selecting and rewording her real master-resume material.

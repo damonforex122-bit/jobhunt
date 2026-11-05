@@ -95,7 +95,11 @@ def connect(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection
 
 
 # Columns added after a table first shipped: (table, column, type)
-_ADDED_COLUMNS = [("gmail_messages", "company", "TEXT"), ("gmail_messages", "title", "TEXT")]
+_ADDED_COLUMNS = [
+    ("gmail_messages", "company", "TEXT"),
+    ("gmail_messages", "title", "TEXT"),
+    ("resumes", "file_sha256", "TEXT"),
+]
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -420,11 +424,11 @@ def save_master_cache(conn: sqlite3.Connection, sha: str, resume_json: str) -> N
 def save_resume(conn: sqlite3.Connection, rec: dict) -> None:
     conn.execute(
         """INSERT OR REPLACE INTO resumes
-           (job_id, path, master_sha256, created_at, gaps_json, fallbacks_json, error)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (job_id, path, master_sha256, created_at, gaps_json, fallbacks_json, error, file_sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (rec["job_id"], rec.get("path"), rec.get("master_sha256"), _now(),
          json.dumps(rec.get("gaps") or []), json.dumps(rec.get("fallbacks") or []),
-         rec.get("error")))
+         rec.get("error"), rec.get("file_sha256")))
     conn.commit()
 
 
@@ -438,5 +442,7 @@ def get_resume(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return rec
 
 
-def resume_paths(conn: sqlite3.Connection) -> set[str]:
-    return {r[0] for r in conn.execute("SELECT path FROM resumes WHERE path IS NOT NULL")}
+def resume_paths(conn: sqlite3.Connection, exclude_job: int | None = None) -> set[str]:
+    rows = conn.execute("SELECT path FROM resumes WHERE path IS NOT NULL AND job_id IS NOT ?",
+                        (exclude_job,))
+    return {r[0] for r in rows}

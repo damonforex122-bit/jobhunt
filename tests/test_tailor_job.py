@@ -114,6 +114,71 @@ def test_handmade_file_never_overwritten(conn, settings):
     assert handmade.read_bytes() == b"hand made"
 
 
+def test_rerun_does_not_take_over_another_jobs_name(conn, settings):
+    a, b = add_job(conn, 1), add_job(conn, 2, title="Data Lead")
+    first = tailor_job(conn, a, settings, client=fake())
+    Path(first.path).unlink()
+    other = tailor_job(conn, b, settings, client=fake())
+    assert other.path == first.path  # B took the plain name
+    before = Path(other.path).read_bytes()
+    again = tailor_job(conn, a, settings, client=fake())
+    assert again.path != first.path
+    assert Path(again.path).name == "Georgia Liu - Resume (Evals Engineer).pdf"
+    assert Path(other.path).read_bytes() == before
+
+
+def test_rerun_never_overwrites_handmade_replacement(conn, settings):
+    j = add_job(conn)
+    first = tailor_job(conn, j, settings, client=fake())
+    Path(first.path).write_bytes(b"hand made")
+    again = tailor_job(conn, j, settings, client=fake())
+    assert again.path != first.path
+    assert Path(first.path).read_bytes() == b"hand made"
+
+
+def test_rerun_after_output_dir_change_does_not_reuse_old_path(conn, settings, tmp_path):
+    j = add_job(conn)
+    first = tailor_job(conn, j, settings, client=fake())
+    moved = settings.model_copy(update={"resume_output_dir": tmp_path / "elsewhere"})
+    again = tailor_job(conn, j, moved, client=fake())
+    assert Path(again.path).is_relative_to(tmp_path / "elsewhere")
+    assert Path(first.path).exists()
+
+
+def test_hallucinated_evidence_id_is_a_gap(conn, settings):
+    m = Matches(matches=[Match(requirement_id="r0", evidence_ids=["e9b9"]),
+                         Match(requirement_id="r2", evidence_ids=["e0b2"])])
+    res = tailor_job(conn, add_job(conn), settings, client=fake(matches=m))
+    assert res.gaps == ["Build forecasting services", "Run Kubernetes clusters"]
+
+
+def test_unfittable_resume_notes_page_count(conn, settings, monkeypatch):
+    real = tailor_mod.fit_to_pages
+
+    def over(resume, ranking, out, *a, **k):
+        fitted, cut, _ = real(resume, ranking, out, *a, **k)
+        return fitted, cut, 3
+
+    monkeypatch.setattr(tailor_mod, "fit_to_pages", over)
+    j = add_job(conn)
+    res = tailor_job(conn, j, settings, client=fake())
+    assert res.error is None and Path(res.path).exists()
+    assert "Couldn't fit in 2 pages: 3 pages" in res.fallbacks
+    assert "Couldn't fit in 2 pages: 3 pages" in db.get_resume(conn, j)["fallbacks"]
+
+
+def test_save_failure_is_a_short_error_and_says_file_was_written(conn, settings, monkeypatch):
+    import sqlite3
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(tailor_mod.db, "save_resume", boom)
+    res = tailor_job(conn, add_job(conn), settings, client=fake())
+    assert res.error and "OperationalError" in res.error and "PDF saved" in res.error and "\n" not in res.error
+    assert res.path and Path(res.path).exists()
+
+
 def test_company_folder_sanitises_and_reuses_case(tmp_path):
     root = tmp_path / "r"
     (root / "OPenAI").mkdir(parents=True)
@@ -143,6 +208,7 @@ def test_write_atomic_cleans_up_on_failure(tmp_path):
     with pytest.raises(RuntimeError):
         write_atomic(boom, dest)
     assert dest.read_bytes() == b"old" and [p.name for p in tmp_path.iterdir()] == ["x.pdf"]
+    assert not list(tmp_path.glob("*.tmp.pdf"))
 
 
 def test_agent_failure_writes_nothing(conn, settings):

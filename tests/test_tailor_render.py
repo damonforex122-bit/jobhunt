@@ -47,9 +47,19 @@ def test_fit_to_pages_cuts_lowest_ranked_first(tmp_path):
     resume.experience[0].bullets += pad
     real = [b for b in resume.all_bullets() if b not in {x.id for x in pad}]
     ranking = real + [b.id for b in pad]
-    fitted, cut = fit_to_pages(resume, ranking, tmp_path / "f.pdf")
+    fitted, cut, n = fit_to_pages(resume, ranking, tmp_path / "f.pdf")
+    assert n <= 2
     assert render_pdf(fitted, tmp_path / "g.pdf") <= 2
     assert cut
     tail = set(ranking[-len(cut):])
     assert set(cut) == tail
     assert all(len(e.bullets) >= 1 for e in fitted.experience)
+
+
+def test_fit_to_pages_reports_pages_when_it_cannot_fit(tmp_path):
+    resume = sample_resume()
+    for e in resume.experience:
+        e.bullets = e.bullets[:1]
+    resume.summary = "word " * 3000
+    _, cut, n = fit_to_pages(resume, [], tmp_path / "f.pdf")
+    assert n > 2 and cut == []

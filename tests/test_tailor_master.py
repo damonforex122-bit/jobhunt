@@ -65,7 +65,7 @@ def test_load_master_unverifiable(conn, tmp_path, monkeypatch):
     with pytest.raises(MasterError) as e:
         load_master(conn, p)
     assert str(e.value).startswith("Couldn't read the master resume reliably")
-    assert "\n" not in str(e.value)
+    assert "\n" not in str(e.value) and str(p) in str(e.value)
     assert conn.execute("SELECT COUNT(*) FROM master_cache").fetchone()[0] == 0
 
 
@@ -131,3 +131,10 @@ def test_settings_expand_home():
     s = Settings(master_resume_path="~/x", resume_output_dir="~/y")
     assert "~" not in str(s.master_resume_path) and s.master_resume_path.name == "x"
     assert "~" not in str(s.resume_output_dir) and s.resume_output_dir.name == "y"
+
+
+def test_load_master_with_sha_returns_the_key_hash(conn, tmp_path):
+    p = tmp_path / "m.pdf"
+    render_pdf(sample_resume(), p)
+    resume, sha = master.load_master_with_sha(conn, p)
+    assert resume == sample_resume() and sha == master.master_sha256(p)
