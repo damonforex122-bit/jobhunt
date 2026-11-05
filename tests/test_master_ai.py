@@ -452,6 +452,62 @@ def test_a_heading_in_the_middle_of_experience_is_not_a_skipped_line(tmp_path):
     assert verdict(read, text) == []
 
 
+def test_preview_shows_every_bullet_under_its_own_role(web, settings, pdf):
+    upload(web, pdf)
+    page = web.get("/profile/master/preview").text
+    read = faithful()
+    positions = [page.index(f"{e.org}") for e in read.experience]
+    assert positions == sorted(positions)
+    ends = [*positions[1:], page.index("Languages")]
+    for e, start, end in zip(read.experience, positions, ends):
+        for b in e.bullets:
+            assert start < page.index(b) < end
+
+
+@pytest.mark.parametrize("dates", ["01/2017 - 12/2019", "2017–19", "Jan '17 – Dec '19", "Summer 2018"])
+def test_absorbed_role_heading_with_other_date_formats_is_rejected(tmp_path, dates):
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         "Built a thing that mattered a lot to the team.", "Beta", "Staff Engineer", dates,
+         "Ran the platform group of eight people."]
+    text = lines_pdf(tmp_path / "d.pdf", g)
+    faithful_read = plain(experience=[role("Acme", [g[6]]), role("Beta", [g[10]], title="Staff Engineer", dates=dates)])
+    assert verdict(faithful_read, text) == []
+    assert verdict(plain(experience=[role("Acme", g[6:11])]), text)
+
+
+def test_a_long_role_heading_read_as_a_bullet_is_rejected(tmp_path):
+    long = "Senior Staff Software Engineer, Platform Infrastructure | January 2017 – December 2019"
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         "Built a thing that mattered a lot to the team.", "Beta Corporation", long,
+         "Ran the platform group of eight people."]
+    text = lines_pdf(tmp_path / "t.pdf", g)
+    assert verdict(plain(experience=[role("Acme", g[6:9])]), text)
+
+
+@pytest.mark.parametrize("where", ["summary", "publication", "education"])
+def test_last_bullet_moved_out_of_experience_is_rejected(tmp_path, where):
+    g = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+         "- Built the first billing pipeline for the team.", "- Ran weekly incident reviews for the org.",
+         "Education", "State University", "BS Computer Science", "2015 - 2019"]
+    text = lines_pdf(tmp_path / "m.pdf", g)
+    edu = [EducationRead(school="State University", detail="BS Computer Science", dates="2015 - 2019")]
+    first, last = g[6][2:], g[7][2:]
+    assert verdict(plain(experience=[role("Acme", [first, last])], education=edu), text) == []
+    moved = plain(experience=[role("Acme", [first])], education=edu)
+    if where == "summary":
+        moved.summary = last
+    elif where == "publication":
+        moved.publications = [last]
+    else:
+        moved.education = [EducationRead(school=last, detail="", dates=""), *edu]
+    assert verdict(moved, text)
+
+
+def test_a_summary_never_sits_on_a_bullet_line(tmp_path):
+    text = lines_pdf(tmp_path / "s.pdf", ["Pat Lee", "pat@example.com", "- Built the first billing pipeline for the team."])
+    assert verdict(plain(summary="Built the first billing pipeline for the team."), text)
+
+
 # --- upload: preview, then confirm ---------------------------------------------------------
 
 @pytest.fixture
@@ -480,7 +536,7 @@ def test_preview_then_confirm_activates(web, settings, pdf):
     assert profile_store.get_master(conn) is None
     assert (mdir / f".pending-{sha}.pdf").is_file()
     page = web.get("/profile").text
-    for want in ("Sam Rivera", "Acme Corp", "Senior Engineer", "2 bullets", "Languages", "Use this resume",
+    for want in ("Sam Rivera", "Acme Corp", "Senior Engineer", BULLETS[0], BULLETS[1], "Languages", "Python, Go, SQL", "State University", "Check that every bullet sits under the right job", "Use this resume",
                  "Try another file", "Save to PDF"):
         assert want in page
     assert "Use this resume" in web.get("/profile/master/preview").text
@@ -540,13 +596,17 @@ def test_preview_escapes_everything(web, settings, pdf, monkeypatch):
     conn = conn_for(settings)
     profile_store.save_pending_master(conn, profile_store.MasterInfo(
         path="x", sha256="0" * 64, name="n", uploaded_at="t"),
-        {"name": "<script>alert(1)</script>", "contact": ["<b>x</b>"], "links": ["<i>l</i>"],
-         "roles": [{"org": "<img src=x onerror=1>", "title": "t", "bullets": 1}], "skills": ["<u>s</u>"],
-         "education": 1, "left_out": ["<em>Intern Co</em> fixed bugs for a summer"]})
+        {"name": "<script>alert(1)</script>", "contact": ["<b>x</b>"], "summary": "<u>sum</u>",
+         "roles": [{"org": "<img src=x onerror=1>", "title": "t", "dates": "d", "location": "l", "blurb": "<s>b</s>",
+                    "bullets": ["<svg onload=1>"]}],
+         "skills": [{"name": "<u>s</u>", "items": ["<i>i</i>"]}],
+         "education": [{"school": "<q>e</q>", "detail": "", "dates": ""}], "publications": ["<marquee>p</marquee>"],
+         "left_out": ["<em>Intern Co</em> fixed bugs for a summer"]})
     conn.close()
     page = web.get("/profile/master/preview").text
     assert "Not included from your PDF" in page and "&lt;em&gt;Intern Co" in page
-    assert "<script>" not in page and "<img" not in page and "<b>x" not in page
+    for raw in ("<script>", "<img", "<b>x", "<u>", "<s>b", "<svg", "<i>i", "<q>", "<marquee"):
+        assert raw not in page
     assert "&lt;script&gt;" in page
 
 

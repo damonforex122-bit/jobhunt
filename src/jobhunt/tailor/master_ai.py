@@ -153,8 +153,10 @@ _LINE_SEPS = "●•▪◦·|:,;-–—*/"  # not content when checking a whole 
 _PAGE_NO = re.compile(r"(?i)(page\s*)?\d+(\s*(of|/)\s*\d+)?")
 _Item = tuple[str, str, str]  # (text, kind, tag): contact | word | field | hfield | skill | para
 _NUMBERED = re.compile(r"(?:\d{1,2}|[A-Za-z])[.)]")
-_DATE = r"(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4})"
-_DATE_RANGE = re.compile(rf"{_DATE}\s*(?:[-–—]|\bto\b)\s*(?:{_DATE}|Present|Current|Now)\b", re.I)
+_MONTHLY = r"(?:[A-Za-z]{3,9}\.?|Spring|Summer|Fall|Autumn|Winter)"
+_DATE = rf"(?:(?:{_MONTHLY}\s+)?(?:\d{{4}}|'\d{{2}})|\d{{1,2}}/\d{{4}})"
+_DATE_RANGE = re.compile(rf"{_DATE}\s*(?:[-–—]|\bto\b)\s*(?:{_DATE}|\d{{2}}\b|Present|Current|Now)", re.I)
+_LONE_DATE = re.compile(_DATE, re.I)
 _CONTACT_SEPS = "|·•●,;"
 
 
@@ -174,7 +176,7 @@ def _sections(resume: Resume) -> list[list[list[_Item]]]:
     any order (a role's org/title/dates/location differ between layouts). Empty strings are dropped."""
     h = resume.header
     header = [[(h.name, "word", ""), *((p, "contact", "") for p in [*h.contact, *(lk.label for lk in h.links)])]]
-    summary = [[(resume.summary, "para", "")]]
+    summary = [[(resume.summary, "sumpara", "")]]
     exp: list[list[_Item]] = []
     for n, e in enumerate(resume.experience):
         exp.append([(e.org, "hfield", f"{n}:org"), (e.location, "hfield", f"{n}:loc"),
@@ -189,11 +191,15 @@ def _sections(resume: Resume) -> list[list[list[_Item]]]:
     return [[[it for it in g if it[0].strip()] for g in sec if any(it[0].strip() for it in g)] for sec in out]
 
 
+HEADER_MAX = 100  # a line this short with a date in it reads like a role heading, not a bullet
+
+
 def _looks_like_header(text: str) -> bool:
-    return len(text) <= 60 and bool(_DATE_RANGE.search(text))
+    t = text.strip()
+    return len(t) <= HEADER_MAX and (bool(_DATE_RANGE.search(t)) or bool(_LONE_DATE.fullmatch(t.strip(" .,"))))
 
 
-def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading) -> list[str]:
+def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading, n_lines) -> list[str]:
     """Checks that text sits with the section and role it came from (no moving of lines around)."""
     out: list[str] = []
     orgs = {e.org.strip() for e in resume.experience if e.org.strip()}
@@ -220,7 +226,11 @@ def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading)
     for si, lines in sec_lines.items():
         if si == 0:
             continue
-        for k in range(min(lines), max(lines) + 1):
+        top = max(lines)
+        if si == 2:  # experience runs on to the next section heading (or the end of the document)
+            while top + 1 < n_lines and not is_heading(line_text(top + 1)):
+                top += 1
+        for k in range(min(lines), top + 1):
             if owners.get(k, set()) - {si}:
                 out.append(f"sections are mixed up near: {line_text(k).strip()[:40]}")
                 break
@@ -264,7 +274,9 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
             return False
         first, last = line_of[s], line_of[e - 1]
         before, after = raw[spans[first][0]:s].strip(), raw[e:spans[last][1]].strip()
-        if kind in ("para",):
+        if kind == "sumpara" and _is_marker_line(line_text(first)):
+            return False  # a summary is prose, never a bullet
+        if kind in ("para", "sumpara"):
             if before and any(c not in _MARKERS for c in before) and not _NUMBERED.fullmatch(before) or after:
                 return False
             return not any(_is_marker_line(line_text(k)) for k in range(first + 1, last + 1))
@@ -328,7 +340,7 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
             ch for k, ch in zip(range(spans[n][0], spans[n][1]), chars)
             if not ch.isspace() and ch not in _LINE_SEPS and not covered[bisect.bisect_left(orig, k)])
 
-    problems += _attribution(resume, where, owners, sec_lines, paras, line_text, _is_heading)
+    problems += _attribution(resume, where, owners, sec_lines, paras, line_text, _is_heading, len(spans))
     for n in sorted(touched):
         if uncovered(n):
             problems.append(f"only part of this line was read: {line_text(n).strip()[:40]}")
@@ -377,13 +389,15 @@ def verify_ai(resume: Resume, pdf_text: str) -> list[str]:
 
 
 def preview_summary(resume: Resume, left_out: list[str] | None = None) -> dict:
-    """What the upload preview shows: enough to see the read is right, nothing to render as markup."""
+    """The whole read, for the user to check before it is used. Plain data; the template escapes it."""
     return {
         "name": resume.header.name,
-        "contact": list(resume.header.contact),
-        "links": [link.label for link in resume.header.links],
-        "roles": [{"org": e.org, "title": e.title, "bullets": len(e.bullets)} for e in resume.experience],
-        "skills": [s.name for s in resume.skills],
-        "education": len(resume.education),
+        "contact": [*resume.header.contact, *(f"{lk.label}" for lk in resume.header.links)],
+        "summary": resume.summary,
+        "roles": [{"org": e.org, "title": e.title, "dates": e.dates, "location": e.location, "blurb": e.blurb,
+                   "bullets": [b.text for b in e.bullets]} for e in resume.experience],
+        "skills": [{"name": sk.name, "items": list(sk.items)} for sk in resume.skills],
+        "education": [{"school": ed.school, "detail": ed.detail, "dates": ed.dates} for ed in resume.education],
+        "publications": ["".join(r.text for r in pub) for pub in resume.publications],
         "left_out": list(left_out or []),
     }
