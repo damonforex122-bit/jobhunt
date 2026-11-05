@@ -79,7 +79,7 @@ def test_tailor_job_writes_pdf_in_company_folder(conn, settings):
     status = db.get_job(conn, j)["status"]
     res = tailor_job(conn, j, settings, client=fake())
     assert res.error is None
-    assert Path(res.path) == settings.resume_output_dir / "Acme" / "Alex Q. Sample, MSc - Resume.pdf"
+    assert Path(res.path) == settings.resume_output_dir / "Acme" / "Alex Q. Sample - Resume.pdf"
     assert Path(res.path).exists() and pages(res.path) <= 2
     rec = db.get_resume(conn, j)
     assert rec["path"] == res.path and rec["master_sha256"] and rec["error"] is None
@@ -91,7 +91,7 @@ def test_second_job_same_company_gets_title_suffix(conn, settings):
     a, b = add_job(conn, 1), add_job(conn, 2, title="Data Lead")
     first = tailor_job(conn, a, settings, client=fake())
     second = tailor_job(conn, b, settings, client=fake())
-    assert Path(second.path).name == "Alex Q. Sample, MSc - Resume (Data Lead).pdf"
+    assert Path(second.path).name == "Alex Q. Sample - Resume (Data Lead).pdf"
     assert Path(second.path).parent == Path(first.path).parent
 
 
@@ -106,11 +106,11 @@ def test_rerun_same_job_overwrites_own_file(conn, settings):
 def test_handmade_file_never_overwritten(conn, settings):
     folder = settings.resume_output_dir / "Acme"
     folder.mkdir(parents=True)
-    handmade = folder / "Alex Q. Sample, MSc - Resume.pdf"
+    handmade = folder / "Alex Q. Sample - Resume.pdf"
     handmade.write_bytes(b"hand made")
     j = add_job(conn)
     res = tailor_job(conn, j, settings, client=fake())
-    assert Path(res.path).name == "Alex Q. Sample, MSc - Resume (Evals Engineer).pdf"
+    assert Path(res.path).name == "Alex Q. Sample - Resume (Evals Engineer).pdf"
     assert handmade.read_bytes() == b"hand made"
 
 
@@ -123,7 +123,7 @@ def test_rerun_does_not_take_over_another_jobs_name(conn, settings):
     before = Path(other.path).read_bytes()
     again = tailor_job(conn, a, settings, client=fake())
     assert again.path != first.path
-    assert Path(again.path).name == "Alex Q. Sample, MSc - Resume (Evals Engineer).pdf"
+    assert Path(again.path).name == "Alex Q. Sample - Resume (Evals Engineer).pdf"
     assert Path(other.path).read_bytes() == before
 
 
@@ -190,11 +190,11 @@ def test_company_folder_sanitises_and_reuses_case(tmp_path):
 
 
 def test_choose_path_numbers_collisions(tmp_path):
-    (tmp_path / "Alex Q. Sample, MSc - Resume.pdf").write_bytes(b"x")
-    (tmp_path / "Alex Q. Sample, MSc - Resume (A/B).pdf".replace("/", "")).write_bytes(b"x")
-    assert choose_path(tmp_path, "A/B", None, "Alex Q. Sample, MSc - Resume").name == "Alex Q. Sample, MSc - Resume (AB) 2.pdf"
+    (tmp_path / "Alex Q. Sample - Resume.pdf").write_bytes(b"x")
+    (tmp_path / "Alex Q. Sample - Resume (A/B).pdf".replace("/", "")).write_bytes(b"x")
+    assert choose_path(tmp_path, "A/B", None, "Alex Q. Sample - Resume").name == "Alex Q. Sample - Resume (AB) 2.pdf"
     owned = tmp_path / "mine.pdf"
-    assert choose_path(tmp_path, "A/B", owned, "Alex Q. Sample, MSc - Resume") == owned
+    assert choose_path(tmp_path, "A/B", owned, "Alex Q. Sample - Resume") == owned
 
 
 def test_write_atomic_cleans_up_on_failure(tmp_path):
@@ -283,7 +283,7 @@ def test_tailor_cli_prints_path(tmp_path, settings, monkeypatch, capsys):
     conn.close()
     assert cli.main(["tailor", str(j)]) == 0
     out = capsys.readouterr().out
-    assert "Saved: " in out and "Alex Q. Sample, MSc - Resume.pdf" in out
+    assert "Saved: " in out and "Alex Q. Sample - Resume.pdf" in out
     assert "Gaps:" in out and "Run Kubernetes clusters" in out
 
 

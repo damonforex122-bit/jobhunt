@@ -17,7 +17,8 @@
 <h2 class="card-title">Resume output folder</h2>
 <form method="post" action="/profile/output" class="space-y-2">
 <label class="form-control"><span class="label-text">Folder for tailored resumes</span><input class="input input-bordered w-full" name="output_dir" value="{{ output_dir }}"></label>
-<button class="btn btn-primary">Save folder</button>
+<label class="form-control"><span class="label-text">Name on resume files (blank means from your resume)</span><input class="input input-bordered w-full" name="file_name" value="{{ file_name }}"></label>
+<button class="btn btn-primary">Save</button>
 </form>
 </div></div>
 

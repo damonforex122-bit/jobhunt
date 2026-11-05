@@ -89,3 +89,11 @@ def effective_master_path(conn: sqlite3.Connection, settings: Settings) -> Path 
 def effective_output_dir(conn: sqlite3.Connection, settings: Settings) -> Path:
     saved = get(conn, "resume_output_dir")
     return Path(saved).expanduser() if saved else settings.resume_output_dir
+
+
+def get_file_name(conn: sqlite3.Connection) -> str | None:
+    return get(conn, "file_name") or None
+
+
+def save_file_name(conn: sqlite3.Connection, name: str) -> None:
+    put(conn, "file_name", name.strip())

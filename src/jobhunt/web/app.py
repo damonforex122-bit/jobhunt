@@ -377,6 +377,7 @@ def create_app(settings: Settings) -> FastAPI:
                       master_path=profile_store.effective_master_path(conn, settings),
                       links=profile_store.get_links(conn),
                       output_dir=profile_store.effective_output_dir(conn, settings),
+                      file_name=profile_store.get_file_name(conn) or "",
                       ai_notes=profile_store.get_ai_notes(conn),
                       prefs=profile_store.effective_preferences(conn, settings), keys=keys)
 
@@ -389,12 +390,17 @@ def create_app(settings: Settings) -> FastAPI:
         return to_profile("Links saved.")
 
     @app.post("/profile/output")
-    def post_profile_output(conn: Conn, output_dir: Annotated[str, Form()] = ""):
+    def post_profile_output(conn: Conn, output_dir: Annotated[str, Form()] = "",
+                            file_name: Annotated[str, Form()] = ""):
         folder = output_dir.strip()
         if not folder:
             return to_profile("Give a folder for the tailored resumes.")
-        profile_store.put(conn, "resume_output_dir", str(Path(folder).expanduser()))
-        return to_profile("Resume output folder saved.")
+        path = Path(folder).expanduser()
+        if not path.is_absolute():
+            return to_profile("Give the full path of the folder, for example ~/Documents/Resumes.")
+        profile_store.put(conn, "resume_output_dir", str(path))
+        profile_store.save_file_name(conn, file_name[:100])
+        return to_profile("Resume output settings saved.")
 
     @app.post("/profile/notes")
     def post_profile_notes(conn: Conn, notes: Annotated[str, Form()] = ""):

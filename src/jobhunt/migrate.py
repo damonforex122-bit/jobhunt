@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from . import db, profile_store
-from .config import _read_dotenv, load_settings
+from .config import _read_dotenv, load_settings, reload_settings
 from .envfile import update_env
 from .profile import load_preferences
 
@@ -32,11 +32,10 @@ def migrate(settings) -> list[str]:
     dotenv = _read_dotenv(settings.env_path)
     changes: dict[str, str | None] = {}
     for key, path in _legacy_paths().items():
-        if key not in dotenv and not os.environ.get(key) and path.exists():
+        if not dotenv.get(key) and not os.environ.get(key) and path.exists():
             changes[key] = str(path)
     if changes:
         update_env(settings.env_path, changes)
-        from .config import reload_settings
         reload_settings(settings)
         actions += [f"Set {k} in {settings.env_path}" for k in changes]
 
@@ -50,6 +49,9 @@ def migrate(settings) -> list[str]:
         if not profile_store.get_ai_notes(conn):
             profile_store.save_ai_notes(conn, OLD_AI_NOTES)
             actions.append("Saved notes for the AI")
+        if profile_store.get_file_name(conn) is None:
+            profile_store.save_file_name(conn, "Georgia Liu")
+            actions.append("Saved the name for resume files")
         if not profile_store.get(conn, "setup_done"):
             profile_store.put(conn, "setup_done", True)
             actions.append("Marked setup as done")

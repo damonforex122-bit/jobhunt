@@ -22,6 +22,12 @@ def resume_base_name(name: str | None) -> str:
     return f"{clean} - Resume" if clean else "Resume"
 
 
+def file_base_name(header_name: str | None, saved: str | None = None) -> str:
+    """The saved name wins; else the header name without ", <credentials>"."""
+    name = saved.strip() if saved and saved.strip() else (header_name or "").split(",")[0]
+    return resume_base_name(name)
+
+
 def company_folder(root: Path, company: str) -> Path:
     name = _clean(_CORP_SUFFIX.sub("", company.strip())) or "Unknown company"
     root = Path(root)

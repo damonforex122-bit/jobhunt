@@ -218,3 +218,71 @@ def test_migrate_profile_keeps_existing_notes_and_env_values(home, tmp_path, cap
     conn = db.connect(s.db_path)
     assert profile_store.get_ai_notes(conn) == "my own notes"
     conn.close()
+
+
+# --- review fixes ---------------------------------------------------------------------------
+
+def test_migrate_fills_keys_present_but_empty(home):
+    Path(".env").write_text("PROFICIENTLY_DIR=\nMASTER_RESUME_PATH=\n")
+    assert main(["migrate-profile"]) == 0
+    s = load_settings()
+    assert s.proficiently_dir == home / "Documents/Resume/.proficiently"
+    assert s.master_resume_path == home / "Documents/Resume/Georgia Liu - Master Resume.pdf"
+
+
+def test_migrate_saves_file_name_unless_set(home):
+    assert main(["migrate-profile"]) == 0
+    s = load_settings()
+    conn = db.connect(s.db_path)
+    assert profile_store.get_file_name(conn) == "Georgia Liu"
+    conn.close()
+
+
+def test_file_name_helpers(conn):
+    from jobhunt.tailor.output import file_base_name
+
+    assert profile_store.get_file_name(conn) is None
+    profile_store.save_file_name(conn, "  Jane D  ")
+    assert profile_store.get_file_name(conn) == "Jane D"
+    profile_store.save_file_name(conn, "")
+    assert profile_store.get_file_name(conn) is None
+    assert file_base_name("Jane Doe, PhD, MBA") == "Jane Doe - Resume"
+    assert file_base_name("Jane Doe") == "Jane Doe - Resume"
+    assert file_base_name("", saved="Georgia Liu") == "Georgia Liu - Resume"
+    assert file_base_name("Jane Doe, PhD", saved="Georgia Liu") == "Georgia Liu - Resume"
+    assert file_base_name(None) == "Resume"
+
+
+def test_tailor_uses_saved_file_name(conn, tmp_path):
+    from test_tailor_job import add_job, fake
+
+    from jobhunt.tailor import tailor_job
+
+    pdf = tmp_path / "m.pdf"
+    render_master_layout(sample_resume(), pdf)
+    s = Settings(db_path=tmp_path / "t.db", master_resume_path=pdf,
+                 resume_output_dir=tmp_path / "out", gemini_api_key="k")
+    res = tailor_job(conn, add_job(conn), s, client=fake())
+    assert Path(res.path).name == "Alex Q. Sample - Resume.pdf"
+    profile_store.save_file_name(conn, "Georgia Liu")
+    res = tailor_job(conn, add_job(conn, 2, company="Other"), s, client=fake())
+    assert Path(res.path).name == "Georgia Liu - Resume.pdf"
+
+
+def test_profile_file_name_field_and_relative_output_rejected(web):
+    c, s = web
+    assert "Name on resume files" in c.get("/profile").text
+    r = c.post("/profile/output", data={"output_dir": "relative/dir", "file_name": "Jane D"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    msg = parse_qs(urlsplit(r.headers["location"]).query)["msg"][0]
+    assert "full path" in msg.lower()
+    conn = db.connect(s.db_path)
+    assert profile_store.effective_output_dir(conn, s) == s.resume_output_dir
+    assert profile_store.get_file_name(conn) is None  # nothing saved on rejection
+    conn.close()
+    r = c.post("/profile/output", data={"output_dir": "~/ok", "file_name": "Jane D"},
+               follow_redirects=False)
+    conn = db.connect(s.db_path)
+    assert profile_store.get_file_name(conn) == "Jane D"
+    conn.close()

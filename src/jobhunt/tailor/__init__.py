@@ -12,13 +12,13 @@ from .. import db
 from ..config import Settings
 from ..fit.gemini import _short_error
 from ..profile_store import (Links, effective_master_path, effective_output_dir,
-                             get_ai_notes, get_links)
+                             get_ai_notes, get_file_name, get_links)
 from . import agents
 from .agents import AgentError, Draft, DraftBullet, DraftEntry, DraftSkills
 from .check import assemble
 from .master import MasterError, load_master_with_sha
 from .model import Bullet, Link, Resume
-from .output import (choose_path, company_folder, file_sha256, resume_base_name, reusable_owned,
+from .output import (choose_path, company_folder, file_base_name, file_sha256, file_base_name, reusable_owned,
                      write_atomic)
 from .render import fit_to_pages
 
@@ -126,7 +126,7 @@ def _finish(conn: sqlite3.Connection, job_id: int, job: dict, settings: Settings
     owned = reusable_owned(owned, old.get("file_sha256") if old else None,
                            db.resume_paths(conn, exclude_job=job_id), out_dir)
     folder = company_folder(out_dir, job["company"])
-    dest = choose_path(folder, job["title"], owned, resume_base_name(resume.header.name))
+    dest = choose_path(folder, job["title"], owned, file_base_name(resume.header.name, get_file_name(conn)))
     fitted: dict = {}
     step("Laying out the PDF…")
 
