@@ -27,8 +27,8 @@ from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..sources import by_link
 from ..tailor import agents, tailor_job
-from ..tailor.master_ai import preview_summary
-from ..tailor.master import MasterError, load_master_with_sha, master_sha256
+from ..tailor.master_ai import preview_summary, verify_ai_full
+from ..tailor.master import MasterError, _pdf_text, load_master_with_sha, master_sha256
 from ..tailor.providers import has_ai_key
 from . import review
 
@@ -457,6 +457,10 @@ def create_app(settings: Settings) -> FastAPI:
             pending_file(pending["info"]["sha256"]).unlink(missing_ok=True)
         profile_store.clear_pending_master(conn)
 
+    def left_out(resume, path: Path) -> list[str]:
+        problems, left = verify_ai_full(resume, _pdf_text(path))
+        return [] if problems else left[:8]
+
     @app.post("/profile/master")
     def post_profile_master(conn: Conn, file: Annotated[UploadFile, File()]):
         data = file.file.read(MAX_MASTER_BYTES + 1)
@@ -482,7 +486,7 @@ def create_app(settings: Settings) -> FastAPI:
             path=str(master_dir / f"{sha}.pdf"), sha256=sha,
             name=Path(file.filename or "master.pdf").name[:200],
             uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")),
-            preview_summary(resume))
+            preview_summary(resume, left_out(resume, master_dir / f".pending-{sha}.pdf")))
         return to_profile("Check how your resume was read, then use it.")
 
     @app.get("/profile/master/preview", response_class=HTMLResponse)

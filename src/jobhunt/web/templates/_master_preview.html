@@ -7,6 +7,8 @@
 {% else %}<li>No roles found</li>{% endfor %}
 </ul>
 <p>Skill categories: {{ s.skills | join(", ") if s.skills else "none" }} · Education entries: {{ s.education }}</p>
+{% if s.left_out %}<div><p class="font-semibold">Not included from your PDF:</p>
+<ul class="list-disc pl-5">{% for t in s.left_out %}<li>{{ t }}</li>{% endfor %}</ul></div>{% endif %}
 <div class="flex gap-2">
 <form method="post" action="/profile/master/confirm"><button class="btn btn-primary">Use this resume</button></form>
 <form method="post" action="/profile/master/cancel"><button class="btn btn-ghost">Try another file</button></form>

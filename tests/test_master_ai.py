@@ -23,6 +23,8 @@ from jobhunt.tailor.master_ai import (
     SkillRead,
     parse_master_ai,
     verify_ai,
+    verify_ai_full,
+    to_resume,
 )
 from jobhunt.web.app import create_app
 
@@ -152,7 +154,7 @@ def test_out_of_order_rejected(pdf, settings):
 
 def test_dropping_more_than_five_percent_rejected(pdf, settings):
     read = faithful()
-    del read.experience[1]
+    del read.experience[2]  # the last role: nothing matched after it, so only the 95% rule sees it
     found = problems(read, pdf, settings)
     assert len(found) == 1 and found[0].startswith("left out ") and found[0].endswith("% of your resume")
 
@@ -199,6 +201,168 @@ def test_no_ai_key_says_add_one(conn, pdf, settings):
 
 def test_parser_version_bumped():
     assert master.PARSER_VERSION >= 2
+
+
+# --- boundaries, attribution, section order, left-out lines (the verbatim guarantee) --------------
+
+def lines_pdf(path, lines):
+    c = canvas.Canvas(str(path), pagesize=letter)
+    y = 760
+    for t in lines:
+        c.setFont("Helvetica", 9)
+        c.drawString(40, y, t)
+        y -= 12
+    c.save()
+    return master._pdf_text(path)
+
+
+def verdict(read, text):
+    return verify_ai(to_resume(read, []), text)
+
+
+def plain(**kw):
+    base = dict(name="Pat Lee", contact=["pat@example.com"], links=[], summary="", experience=[],
+                publications=[], skills=[], education=[])
+    return ResumeRead(**{**base, **kw})
+
+
+def role(org, bullets, title="Engineer", dates="2019 - 2020", location="", blurb=""):
+    return EntryRead(org=org, location=location, title=title, dates=dates, blurb=blurb, bullets=bullets)
+
+
+def test_a_cut_off_number_is_rejected(pdf, settings):
+    read = faithful()
+    read.experience[2].bullets[0] = "Wrote a log search CLI that reached 30"
+    assert problems(read, pdf, settings)
+
+
+def test_a_mid_sentence_fragment_is_rejected(pdf, settings):
+    read = faithful()
+    read.experience[0].bullets[0] = "p95 latency from 900ms to 200ms"
+    assert problems(read, pdf, settings)
+    read = faithful()
+    read.experience[1].bullets[1] = "Owned the on-call rotation for the payments service"
+    assert problems(read, pdf, settings)
+
+
+@pytest.mark.parametrize("fake_skill", ["C", "R", "AI", "Go", "S", "E", "Py"])
+def test_invented_short_skill_is_rejected(pdf, settings, fake_skill):
+    read = faithful()
+    read.skills[0].items.append(fake_skill)
+    assert fake_skill in problems(read, pdf, settings)
+
+
+def test_partial_title_is_rejected(pdf, settings):
+    read = faithful()
+    read.experience[0].title = "Engineer"  # the PDF says Senior Engineer
+    assert problems(read, pdf, settings)
+
+
+def test_skills_carved_out_of_words_are_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "s.pdf", ["Pat Lee", "pat@example.com", "SKILLS",
+                                          "Languages: JavaScript, TypeScript, PostgreSQL", "Cloud: Google Cloud, Azure"])
+    good = [SkillRead(name="Languages", items=["JavaScript", "TypeScript", "PostgreSQL"]),
+            SkillRead(name="Cloud", items=["Google Cloud", "Azure"])]
+    assert verdict(plain(skills=good), text) == []
+    carved = [SkillRead(name="Languages", items=["Java", "Script", "TypeScript", "Postgre", "SQL"]),
+              SkillRead(name="Cloud", items=["Google", "Cloud", "Azure"])]
+    assert verdict(plain(skills=carved), text)
+    moved = [SkillRead(name="Languages", items=["JavaScript", "TypeScript"]),
+             SkillRead(name="Cloud", items=["PostgreSQL", "Google Cloud", "Azure"])]
+    assert verdict(plain(skills=moved), text)  # a skill moved to another category
+    moved = [SkillRead(name="Languages", items=["JavaScript", "TypeScript", "PostgreSQL", "Google Cloud"]),
+             SkillRead(name="Cloud", items=["Azure"])]
+    assert verdict(plain(skills=moved), text)
+
+
+def test_bullet_moved_to_the_next_role_is_rejected(pdf, settings):
+    read = faithful()
+    b = read.experience[0].bullets.pop()
+    read.experience[1].bullets.insert(0, b)
+    assert problems(read, pdf, settings)
+    read = faithful()
+    read.experience[0].bullets.append(read.experience[1].bullets.pop(0))
+    assert problems(read, pdf, settings)
+
+
+def test_bullet_turned_into_a_blurb_or_location_is_rejected(pdf, settings):
+    read = faithful()
+    read.experience[1].blurb = read.experience[0].bullets.pop()
+    assert problems(read, pdf, settings)
+    read = faithful()
+    read.experience[1].location = read.experience[0].bullets.pop()
+    assert problems(read, pdf, settings)
+
+
+def test_dropped_role_header_with_merged_bullets_is_rejected(tmp_path):
+    lines, roles = ["Pat Lee", "pat@example.com", "EXPERIENCE"], []
+    for i in range(4):
+        bs = [f"Delivered project number {i} {k} with measurable impact across several teams." for k in range(2)]
+        lines += [f"Company{i} Ltd", "Engineer", "2019 - 2020", *("- " + b for b in bs)]
+        roles.append(role(f"Company{i} Ltd", bs))
+    text = lines_pdf(tmp_path / "r.pdf", lines)
+    assert verdict(plain(experience=roles), text) == []
+    merged = [*roles[:2], role("Company2 Ltd", roles[2].bullets + roles[3].bullets)]
+    assert verdict(plain(experience=merged), text)
+    assert verdict(plain(experience=[*roles[:1], *roles[2:]]), text)  # a whole middle role dropped
+
+
+def test_education_before_experience_is_accepted(tmp_path):
+    text = lines_pdf(tmp_path / "o.pdf", [
+        "Pat Lee", "pat@example.com", "EDUCATION", "State University, BS CS, 2016 - 2020", "EXPERIENCE",
+        "Acme", "Engineer", "2019 - 2020", "- Built a thing that mattered a lot."])
+    read = plain(experience=[role("Acme", ["Built a thing that mattered a lot."])],
+                 education=[EducationRead(school="State University", detail="BS CS", dates="2016 - 2020")])
+    assert verdict(read, text) == []
+
+
+def test_sidebar_first_layout_is_accepted(tmp_path):
+    text = lines_pdf(tmp_path / "l.pdf", [
+        "Contact", "pat@example.com", "Top Skills", "Python", "Go", "Pat Lee", "Tinkerer and coffee enthusiast",
+        "Experience", "Acme", "Engineer", "2019 - 2020", "Built a thing that mattered a lot to the team."])
+    read = plain(skills=[SkillRead(name="Top Skills", items=["Python", "Go"])],
+                 summary="Tinkerer and coffee enthusiast",
+                 experience=[role("Acme", ["Built a thing that mattered a lot to the team."])])
+    assert verdict(read, text) == []
+
+
+def test_a_caps_company_name_is_not_mistaken_for_a_heading(tmp_path):
+    text = lines_pdf(tmp_path / "h.pdf", ["Pat Lee", "pat@example.com", "EXPERIENCE", "ACME TRAINING CORP",
+                                          "Engineer", "2019 - 2020", "- Built a thing."])
+    dropped = plain(experience=[role("", ["Built a thing."])])
+    assert verdict(dropped, text)
+
+
+def test_small_trailing_role_left_out_is_reported(tmp_path):
+    lines = ["Pat Lee", "pat@example.com", "EXPERIENCE"]
+    roles = []
+    for i in range(8):
+        bs = [f"Delivered project number {i} {k} with measurable impact across several teams." for k in range(3)]
+        lines += [f"Company{i} Ltd", "Engineer", "2019 - 2020", *("- " + b for b in bs)]
+        roles.append(role(f"Company{i} Ltd", bs))
+    lines += ["Intern Co", "Engineer", "2019 - 2020", "- Fixed bugs."]
+    text = lines_pdf(tmp_path / "e.pdf", lines)
+    found, left = verify_ai_full(to_resume(plain(experience=roles), []), text)
+    assert found == [] and any("Intern Co" in t for t in left)
+
+
+def test_preview_lists_what_was_left_out(settings, pdf, monkeypatch):
+    read = faithful()
+    read.experience[0].bullets = BULLETS  # whole PDF read: nothing left out
+    monkeypatch.setattr(agents, "make_client", lambda s, on_switch=None: fake(read))
+    with TestClient(create_app(settings), base_url="http://127.0.0.1") as c:
+        upload(c, pdf)
+        assert "Not included from your PDF" not in c.get("/profile").text
+
+
+def test_header_links_are_only_looked_for_in_the_first_lines(tmp_path):
+    p = tmp_path / "x.pdf"
+    c = canvas.Canvas(str(p), pagesize=letter)
+    for k in range(12):
+        c.drawString(40, 760 - 14 * k, "LinkedIn" if k == 10 else f"line {k}")
+    c.linkURL("https://elsewhere.example.com", (40, 760 - 140 - 2, 100, 760 - 140 + 10))
+    c.save()
+    assert master_ai._header_urls(master.PdfReader(p), ["LinkedIn"]) == []
 
 
 # --- upload: preview, then confirm ---------------------------------------------------------
@@ -291,9 +455,10 @@ def test_preview_escapes_everything(web, settings, pdf, monkeypatch):
         path="x", sha256="0" * 64, name="n", uploaded_at="t"),
         {"name": "<script>alert(1)</script>", "contact": ["<b>x</b>"], "links": ["<i>l</i>"],
          "roles": [{"org": "<img src=x onerror=1>", "title": "t", "bullets": 1}], "skills": ["<u>s</u>"],
-         "education": 1})
+         "education": 1, "left_out": ["<em>Intern Co</em> fixed bugs for a summer"]})
     conn.close()
     page = web.get("/profile/master/preview").text
+    assert "Not included from your PDF" in page and "&lt;em&gt;Intern Co" in page
     assert "<script>" not in page and "<img" not in page and "<b>x" not in page
     assert "&lt;script&gt;" in page
 
