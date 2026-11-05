@@ -22,12 +22,17 @@ class Settings(BaseModel):
     gmail_token: Path = Path("data/gmail_token.json")
     master_resume_path: Path = Path("~/Documents/Resume/Georgia Liu - Master Resume.pdf").expanduser()
     resume_output_dir: Path = Path("~/Documents/Resume").expanduser()
+    env_path: Path = Path(".env")
 
     @field_validator("proficiently_dir", "db_path", "watchlist_path", "gmail_client_secret",
-                     "gmail_token", "master_resume_path", "resume_output_dir")
+                     "gmail_token", "master_resume_path", "resume_output_dir", "env_path")
     @classmethod
     def _expand_home(cls, v: Path) -> Path:
         return Path(v).expanduser()
+
+
+KEY_FIELDS = ("gemini_api_key", "anthropic_api_key", "openrouter_api_key", "apollo_api_key",
+              "exa_api_key")
 
 
 def short_error(exc: Exception) -> str:
@@ -61,4 +66,16 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         for field in Settings.model_fields
         if env.get(field.upper())  # empty values (as in .env.example) count as unset
     }
-    return Settings(**kwargs)
+    return Settings(**kwargs, env_path=env_file)
+
+
+def reload_settings(settings: Settings) -> None:
+    """Re-read settings.env_path and the environment, updating `settings` in place so that
+    closures holding this instance see the new values."""
+    fresh = load_settings(settings.env_path)
+    for field in Settings.model_fields:
+        value = getattr(fresh, field)
+        if isinstance(value, Path):
+            value = value.expanduser()
+        setattr(settings, field, value)
+    settings.env_path = Path(settings.env_path)
