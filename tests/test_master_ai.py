@@ -365,6 +365,93 @@ def test_header_links_are_only_looked_for_in_the_first_lines(tmp_path):
     assert master_ai._header_urls(master.PdfReader(p), ["LinkedIn"]) == []
 
 
+def four_roles(tmp_path):
+    lines, roles = ["Pat Lee", "pat@example.com", "EXPERIENCE"], []
+    titles = ["Engineer", "Senior Engineer", "Staff Engineer", "Principal Engineer"]
+    for i in range(4):
+        bs = [f"Delivered project number {i} {k} with measurable impact across several teams." for k in range(2)]
+        lines += [f"Company{i} Ltd", titles[i], f"201{i} - 201{i + 1}", *("- " + b for b in bs)]
+        roles.append(role(f"Company{i} Ltd", bs, title=titles[i], dates=f"201{i} - 201{i + 1}"))
+    return roles, titles, lines_pdf(tmp_path / "r4.pdf", lines)
+
+
+def merged_without_third(roles, titles):
+    return [*roles[:2], role("Company2 Ltd", roles[2].bullets + roles[3].bullets, title=titles[2], dates="2012 - 2013")]
+
+
+def test_dropped_role_header_laundered_into_education_or_contact_is_rejected(tmp_path):
+    roles, titles, text = four_roles(tmp_path)
+    assert verdict(plain(experience=roles), text) == []
+    merged = merged_without_third(roles, titles)
+    edu = [EducationRead(school="Company3 Ltd", detail=titles[3], dates="2013 - 2014")]
+    assert verdict(plain(experience=merged, education=edu), text)
+    contact = ["pat@example.com", "Company3 Ltd", titles[3], "2013 - 2014"]
+    assert verdict(plain(contact=contact, experience=merged), text)
+
+
+def test_a_bullet_moved_into_the_summary_is_rejected(tmp_path):
+    roles, titles, text = four_roles(tmp_path)
+    moved = [roles[0], role("Company1 Ltd", roles[1].bullets[1:], title=titles[1], dates="2011 - 2012"), *roles[2:]]
+    assert verdict(plain(experience=moved, summary=roles[1].bullets[0]), text)
+
+
+GLYPHLESS = ["Pat Lee", "pat@example.com", "Experience", "Acme", "Engineer", "2019 - 2020",
+             "Built a thing that mattered a lot to the team.", "Shipped the payments migration with zero downtime.",
+             "Beta", "Staff Engineer", "2017 - 2019", "Ran the platform group of eight people."]
+
+
+def glyphless_roles(**beta):
+    return [role("Acme", GLYPHLESS[6:8]),
+            role("Beta", [GLYPHLESS[11]], title="Staff Engineer", dates="2017 - 2019", **beta)]
+
+
+def test_glyphless_layout_faithful_read_is_accepted_and_moves_are_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "g.pdf", GLYPHLESS)
+    assert verdict(plain(experience=glyphless_roles()), text) == []
+    moved = [role("Acme", GLYPHLESS[6:7]), glyphless_roles(location=GLYPHLESS[7])[1]]
+    assert verdict(plain(experience=moved), text)  # A's last bullet became B's location
+    absorbed = [role("Acme", GLYPHLESS[6:8] + GLYPHLESS[8:12])]
+    assert verdict(plain(experience=absorbed), text)  # B's heading lines read as A's bullets
+
+
+def test_a_location_must_be_short_and_next_to_the_role_heading(tmp_path):
+    lines = ["Pat Lee", "pat@example.com", "Acme", "Engineer", "2019 - 2020", "Built things that mattered a lot", "Remote"]
+    text = lines_pdf(tmp_path / "l.pdf", lines)
+    far = plain(experience=[role("Acme", ["Built things that mattered a lot"], location="Remote")])
+    assert verdict(far, text)  # 'Remote' is not beside the heading and the heading lines are not consecutive
+
+
+def test_contact_items_must_be_whole_segments(pdf, settings):
+    read = faithful()
+    read.contact = ["Portland, OR", "sam@example"]
+    assert problems(read, pdf, settings)
+
+
+def test_a_split_wrapped_bullet_is_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "w.pdf", ["Pat Lee", "pat@example.com", "EXPERIENCE", "Acme", "Engineer", "2019 - 2020",
+                                          "- Led the review that decided not", "  to ship the risky launch."])
+    whole = plain(experience=[role("Acme", ["Led the review that decided not to ship the risky launch."])])
+    assert verdict(whole, text) == []
+    split = plain(experience=[role("Acme", ["Led the review that decided not", "to ship the risky launch."])])
+    assert verdict(split, text)
+
+
+def test_numbered_bullets_are_accepted(tmp_path):
+    text = lines_pdf(tmp_path / "n.pdf", ["Pat Lee", "pat@example.com", "EXPERIENCE", "Acme", "Engineer", "2019 - 2020",
+                                          "1. Built the first thing for the team.", "2) Built the second thing too."])
+    read = plain(experience=[role("Acme", ["Built the first thing for the team.", "Built the second thing too."])])
+    assert verdict(read, text) == []
+
+
+def test_a_heading_in_the_middle_of_experience_is_not_a_skipped_line(tmp_path):
+    lines = ["Pat Lee", "pat@example.com", "EXPERIENCE", "Acme", "Engineer", "2019 - 2020", "- Built the first thing.",
+             "ADDITIONAL EXPERIENCE", "Beta", "Engineer", "2017 - 2019", "- Built the other thing."]
+    text = lines_pdf(tmp_path / "a.pdf", lines)
+    read = plain(experience=[role("Acme", ["Built the first thing."]),
+                             role("Beta", ["Built the other thing."], dates="2017 - 2019")])
+    assert verdict(read, text) == []
+
+
 # --- upload: preview, then confirm ---------------------------------------------------------
 
 @pytest.fixture

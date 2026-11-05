@@ -32,6 +32,8 @@ _HEADING_LINES = {  # lines that are exactly a section heading (any case)
     "SUMMARY", "PROFILE", "PROFESSIONAL SUMMARY", "EXPERIENCE", "WORK EXPERIENCE", "WORK HISTORY",
     "PROFESSIONAL EXPERIENCE", "EMPLOYMENT HISTORY", "EDUCATION", "SKILLS", "TECHNICAL SKILLS", "TOP SKILLS",
     "PROJECTS", "PUBLICATIONS", "CERTIFICATIONS", "AWARDS", "HONORS & AWARDS", "LANGUAGES", "INTERESTS",
+    "ADDITIONAL EXPERIENCE", "RELEVANT EXPERIENCE", "OTHER EXPERIENCE", "SELECTED PROJECTS", "PERSONAL PROJECTS",
+    "OPEN SOURCE", "ADDITIONAL INFORMATION",
     "VOLUNTEER EXPERIENCE", "TRAINING", "CONTACT",
 }
 _SAFE_URL_PREFIXES = ("http://", "https://", "mailto:")
@@ -149,12 +151,17 @@ _MARKERS = "●•▪◦·-–—*"  # bullet glyphs and dashes
 _SKILL_SEPS = ",;:|/•●·"
 _LINE_SEPS = "●•▪◦·|:,;-–—*/"  # not content when checking a whole line is accounted for
 _PAGE_NO = re.compile(r"(?i)(page\s*)?\d+(\s*(of|/)\s*\d+)?")
-_Item = tuple[str, str]  # (text, kind): word | field | hfield | skill | para
+_Item = tuple[str, str, str]  # (text, kind, tag): contact | word | field | hfield | skill | para
+_NUMBERED = re.compile(r"(?:\d{1,2}|[A-Za-z])[.)]")
+_DATE = r"(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4})"
+_DATE_RANGE = re.compile(rf"{_DATE}\s*(?:[-–—]|\bto\b)\s*(?:{_DATE}|Present|Current|Now)\b", re.I)
+_CONTACT_SEPS = "|·•●,;"
 
 
 def _is_marker_line(line: str) -> bool:
     s = line.lstrip()
-    return bool(s) and (s[0] in "●•▪◦·" or (s[0] in "-–—*" and (len(s) == 1 or s[1].isspace())))
+    return bool(s) and (s[0] in "●•▪◦·" or (s[0] in "-–—*" and (len(s) == 1 or s[1].isspace()))
+                        or bool(re.match(r"(?:\d{1,2}|[A-Za-z])[.)]\s", s)))
 
 
 def _is_heading(line: str) -> bool:
@@ -166,19 +173,62 @@ def _sections(resume: Resume) -> list[list[list[_Item]]]:
     any order; inside a section the groups must follow each other. Strings inside one group may come in
     any order (a role's org/title/dates/location differ between layouts). Empty strings are dropped."""
     h = resume.header
-    header = [[(h.name, "word"), *((p, "word") for p in [*h.contact, *(lk.label for lk in h.links)])]]
-    summary = [[(resume.summary, "para")]]
+    header = [[(h.name, "word", ""), *((p, "contact", "") for p in [*h.contact, *(lk.label for lk in h.links)])]]
+    summary = [[(resume.summary, "para", "")]]
     exp: list[list[_Item]] = []
-    for e in resume.experience:
-        exp.append([(e.org, "hfield"), (e.location, "hfield"), (e.title, "hfield"), (e.dates, "hfield")])
-        exp.append([(e.blurb, "para")])  # the blurb comes after all the header fields
-        exp += [[(b.text, "para")] for b in e.bullets]
-    pubs = [[("".join(r.text for r in pub), "para")] for pub in resume.publications]
-    skills = [[(sk.name, "skill")] if i == 0 else [(it, "skill")]
+    for n, e in enumerate(resume.experience):
+        exp.append([(e.org, "hfield", f"{n}:org"), (e.location, "hfield", f"{n}:loc"),
+                    (e.title, "hfield", f"{n}:title"), (e.dates, "hfield", f"{n}:dates")])
+        exp.append([(e.blurb, "para", f"{n}:blurb")])  # the blurb comes after all the header fields
+        exp += [[(b.text, "para", f"{n}:bullet")] for b in e.bullets]
+    pubs = [[("".join(r.text for r in pub), "para", "")] for pub in resume.publications]
+    skills = [[(sk.name, "skill", "")] if i == 0 else [(it, "skill", "")]
               for sk in resume.skills for i, it in enumerate([sk.name, *sk.items])]
-    edu = [[(ed.school, "field"), (ed.detail, "field"), (ed.dates, "field")] for ed in resume.education]
+    edu = [[(ed.school, "field", ""), (ed.detail, "field", ""), (ed.dates, "field", "")] for ed in resume.education]
     out = [header, summary, exp, pubs, skills, edu]
-    return [[[(t, k) for t, k in g if t.strip()] for g in sec if any(t.strip() for t, _ in g)] for sec in out]
+    return [[[it for it in g if it[0].strip()] for g in sec if any(it[0].strip() for it in g)] for sec in out]
+
+
+def _looks_like_header(text: str) -> bool:
+    return len(text) <= 60 and bool(_DATE_RANGE.search(text))
+
+
+def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading) -> list[str]:
+    """Checks that text sits with the section and role it came from (no moving of lines around)."""
+    out: list[str] = []
+    orgs = {e.org.strip() for e in resume.experience if e.org.strip()}
+    for e in resume.experience:
+        for b in e.bullets:  # a role header line read as a bullet (glyph-less layouts)
+            t = b.text.strip()
+            if _looks_like_header(t) or t in orgs:
+                out.append(f"a bullet that looks like a role heading: {t[:40]}")
+    for n, e in enumerate(resume.experience):
+        loc = e.location.strip()
+        if loc and (len(loc) > 60 or len(loc.split()) > 8 or loc.endswith(".")):
+            out.append(f"not a location: {loc[:40]}")
+        spans = [where[f"{n}:{f}"] for f in ("org", "title", "dates") if f"{n}:{f}" in where]
+        if loc and f"{n}:loc" in where and spans:
+            lf, ll = where[f"{n}:loc"]
+            if not any(lf <= b + 1 and a - 1 <= ll for a, b in spans):
+                out.append(f"location is not next to the role heading: {loc[:40]}")
+        head = [where[f"{n}:{f}"] for f in ("org", "loc", "title", "dates") if f"{n}:{f}" in where]
+        if head:
+            lines = {k for a, b in head for k in range(a, b + 1)}
+            lo, hi = min(lines), max(lines)
+            if hi - lo + 1 > 4 or any(k not in lines for k in range(lo, hi + 1)):
+                out.append(f"the heading of a role is not on consecutive lines: {e.org[:30]}")
+    for si, lines in sec_lines.items():
+        if si == 0:
+            continue
+        for k in range(min(lines), max(lines) + 1):
+            if owners.get(k, set()) - {si}:
+                out.append(f"sections are mixed up near: {line_text(k).strip()[:40]}")
+                break
+    marked = {k for a, b, m in paras if m for k in range(a, b + 1)}
+    for a, b, m in paras:
+        if not m and a - 1 in marked:
+            out.append(f"a bullet was split in two: {line_text(a).strip()[:40]}")
+    return out
 
 
 def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]:
@@ -215,17 +265,23 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
         first, last = line_of[s], line_of[e - 1]
         before, after = raw[spans[first][0]:s].strip(), raw[e:spans[last][1]].strip()
         if kind in ("para",):
-            if before and any(c not in _MARKERS for c in before) or after:
+            if before and any(c not in _MARKERS for c in before) and not _NUMBERED.fullmatch(before) or after:
                 return False
             return not any(_is_marker_line(line_text(k)) for k in range(first + 1, last + 1))
         if kind == "skill":
             return (not before or before[-1] in _SKILL_SEPS) and (not after or after[0] in _SKILL_SEPS)
+        if kind == "contact":
+            return (not before or before[-1] in _CONTACT_SEPS) and (not after or after[0] in _CONTACT_SEPS)
         if kind == "hfield":
             return not _is_marker_line(line_text(first))
         return True
 
     touched: set[int] = set()  # lines whose every character must be accounted for
     exp_lines: list[int] = []
+    owners: dict[int, set[int]] = {}  # line -> sections whose strings sit on it
+    sec_lines: dict[int, list[int]] = {}
+    where: dict[str, tuple[int, int]] = {}  # "role:field" -> first and last line
+    paras: list[tuple[int, int, bool]] = []  # (first line, last line, started after a marker)
 
     def locate(text: str, kind: str, start: int):
         needle = _squash(text)
@@ -241,7 +297,7 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
         pos = 0
         for group in section:
             group_end = pos
-            for text, kind in group:
+            for text, kind, tag in group:
                 hit = locate(text, kind, pos)
                 if hit is None:
                     problems.append(text)
@@ -253,6 +309,13 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
                 first, last = line_of[orig[i]], line_of[orig[j - 1]]
                 if kind in ("hfield", "skill", "field"):
                     touched.update(range(first, last + 1))
+                for n in range(first, last + 1):
+                    owners.setdefault(n, set()).add(si)
+                sec_lines.setdefault(si, []).extend([first, last])
+                if tag:
+                    where[tag] = (first, last)
+                if kind == "para":
+                    paras.append((first, last, bool(raw[spans[first][0]:orig[i]].strip())))
                 if si == 2:
                     exp_lines += [first, last]
             pos = group_end
@@ -265,6 +328,7 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
             ch for k, ch in zip(range(spans[n][0], spans[n][1]), chars)
             if not ch.isspace() and ch not in _LINE_SEPS and not covered[bisect.bisect_left(orig, k)])
 
+    problems += _attribution(resume, where, owners, sec_lines, paras, line_text, _is_heading)
     for n in sorted(touched):
         if uncovered(n):
             problems.append(f"only part of this line was read: {line_text(n).strip()[:40]}")
