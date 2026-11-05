@@ -1,3 +1,4 @@
+import re
 from urllib.parse import parse_qs, unquote, urlsplit
 
 _GREENHOUSE_HOSTS = {"job-boards.greenhouse.io", "boards.greenhouse.io"}
@@ -35,3 +36,7 @@ def ats_from_url(url: str) -> tuple[str, str] | None:
     if host == "jobs.lever.co":
         return ("lever", slug)
     return None
+
+
+def slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")

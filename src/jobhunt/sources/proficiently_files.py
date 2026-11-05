@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..db import get_company, save_material, upsert_company, upsert_person
 from ..models import Company, Person
-from ..urls import ats_from_url, normalize_url
+from ..urls import ats_from_url, normalize_url, slugify
 
 KNOWN_FILES = {
     "resume.pdf": "resume_pdf",
@@ -24,17 +24,13 @@ LINKEDIN_RE = re.compile(r"https?://(?:[\w-]+\.)?linkedin\.com/in/[^\s)>\]|]+")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
-def _slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-
-
 def _split_row(line: str) -> list[str]:
     return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
 
 
-def _find_job_id(conn: sqlite3.Connection, folder: Path) -> int | None:
+def _find_job_id(conn: sqlite3.Connection, folder: Path, real_root: Path) -> int | None:
     posting = folder / "posting.md"
-    if posting.is_file():
+    if posting.is_file() and posting.resolve().is_relative_to(real_root):
         m = URL_RE.search(posting.read_text(errors="replace"))
         if m:
             row = conn.execute("SELECT id FROM jobs WHERE url = ?",
@@ -43,7 +39,7 @@ def _find_job_id(conn: sqlite3.Connection, folder: Path) -> int | None:
                 return row["id"]
     best: tuple[str, int] | None = None
     for row in conn.execute("SELECT id, company, title FROM jobs"):
-        prefix = f"{_slugify(row['company'])}-{_slugify(row['title'])}-"
+        prefix = f"{slugify(row['company'])}-{slugify(row['title'])}-"
         name = folder.name
         if name.startswith(prefix) and DATE_RE.fullmatch(name[len(prefix):]):
             if best is None or name[len(prefix):] > best[0]:
@@ -60,7 +56,7 @@ def import_materials(conn: sqlite3.Connection, root: Path) -> dict:
         return counts
     for folder in sorted(d for d in jobs_root.iterdir() if d.is_dir()):
         counts["folders"] += 1
-        job_id = _find_job_id(conn, folder)
+        job_id = _find_job_id(conn, folder, real_root)
         if job_id is None:
             counts["unmatched_folders"] += 1
             continue
@@ -182,13 +178,19 @@ def import_careers(conn: sqlite3.Connection, root: Path) -> dict:
     return counts
 
 
-def import_digests(conn: sqlite3.Connection, root: Path) -> int:
+def import_digests(conn: sqlite3.Connection, root: Path, stats: dict | None = None) -> int:
     folder = Path(root) / "daily-digest"
     if not folder.is_dir():
         return 0
     added = 0
     for f in sorted(folder.glob("*.md")):
         if not f.is_file() or not DATE_RE.fullmatch(f.stem):
+            continue
+        try:
+            datetime.strptime(f.stem, "%Y-%m-%d")
+        except ValueError:  # date-shaped but not a real date
+            if stats is not None:
+                stats["skipped"] = stats.get("skipped", 0) + 1
             continue
         real = f.resolve()
         if not real.is_relative_to(Path(root).resolve()):

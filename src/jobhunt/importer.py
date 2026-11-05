@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .db import finish_run, set_job_status, start_run, upsert_company, upsert_job, upsert_person
 from .models import Company, Job, Person
-from .urls import ats_from_url, normalize_url
+from .urls import ats_from_url, normalize_url, slugify
 
 TRIAGE = {"ready", "needs", "low"}
 FORWARD = {"applied", "screening", "interviewing", "offer"}
@@ -111,10 +111,6 @@ def parse_job_dir(path: Path) -> tuple[str | None, list[Person]]:
     return posting, people
 
 
-def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-
-
 def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
     prefix = f"{slugify(job.company)}-{slugify(job.title)}-"
     matches = [
@@ -199,7 +195,9 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
 
         counts["materials"] = import_materials(conn, root)
         counts["careers"] = import_careers(conn, root)
-        counts["digests"] = import_digests(conn, root)
+        digest_stats: dict = {}
+        counts["digests"] = import_digests(conn, root, digest_stats)
+        counts["digests_skipped"] = digest_stats.get("skipped", 0)
     except Exception as e:
         finish_run(conn, run_id, counts, error=str(e))
         raise

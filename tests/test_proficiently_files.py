@@ -163,3 +163,21 @@ def test_full_import_rerun_adds_no_duplicate_materials_people_or_digests(conn, t
     assert s2[2] == s1[2] + 1  # only the new import run row
     assert conn.execute("SELECT COUNT(*) FROM runs WHERE kind='import'").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM runs WHERE kind='digest'").fetchone()[0] == 1
+
+
+def test_invalid_digest_date_skipped_not_fatal(conn, tmp_path):
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1)], digests={
+        "2026-13-45": "# d\n\nNew jobs found: 9\n", "2026-11-02": "# d\n\nNew jobs found: 1\n"})
+    c = run_import(conn, root)
+    assert c["digests"] == 1 and c["digests_skipped"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM runs WHERE kind='digest'").fetchone()[0] == 1
+    run_import(conn, root)  # later imports keep working
+
+
+def test_symlinked_posting_outside_root_not_read(conn, tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text(f"{H}1\n")
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1)], folders={"odd-folder": {}})
+    os.symlink(outside, root / "jobs" / "odd-folder" / "posting.md")
+    c = run_import(conn, root)
+    assert c["materials"]["unmatched_folders"] == 1 and c["materials"]["files"] == 0
