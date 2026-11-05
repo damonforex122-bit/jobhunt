@@ -364,7 +364,9 @@ _INTERVIEW_COLS = ("uid", "gmail_id", "job_id", "company", "start", "end", "summ
 
 def upsert_interview(conn: sqlite3.Connection, row: dict) -> None:
     vals = [row.get(c) for c in _INTERVIEW_COLS]
-    sets = ", ".join(f"{c} = excluded.{c}" for c in _INTERVIEW_COLS[1:])
+    sets = ", ".join(
+        f"{c} = COALESCE(excluded.{c}, interviews.{c})" if c in ("job_id", "company")
+        else f"{c} = excluded.{c}" for c in _INTERVIEW_COLS[1:])
     conn.execute(
         f"INSERT INTO interviews ({', '.join(_INTERVIEW_COLS)}) "
         f"VALUES ({', '.join('?' * len(_INTERVIEW_COLS))}) ON CONFLICT(uid) DO UPDATE SET {sets}",

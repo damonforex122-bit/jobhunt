@@ -104,3 +104,62 @@ def test_subject_fallback_and_unknown_company(conn, tmp_path):
     [row] = listed(conn)
     assert row["uid"] == "gmail:m1" and row["job_id"] is None
     assert row["start"] == "2026-11-09T19:15:00+00:00"
+
+
+@respx.mock
+def test_bad_message_is_skipped_and_marked_seen_good_one_lands(conn, tmp_path, job):
+    mock({"good": invite_msg("good", "Invitation: x"),
+          "bad": invite_msg("bad", "Invitation: y", start="99991231T235959")})
+    assert sync(conn, tmp_path) == 1
+    assert len(listed(conn)) == 1
+    assert db.interview_seen_ids(conn) == {"good", "bad"}
+
+
+@respx.mock
+def test_transient_fetch_error_skips_without_marking_seen(conn, tmp_path, job):
+    mock({"good": invite_msg("good", "Invitation: x"), "flaky": invite_msg("flaky", "Invitation: y")})
+    respx.get(f"{API}/messages/flaky").respond(status_code=500, json={"error": {"message": "boom"}})
+    assert sync(conn, tmp_path) == 1
+    assert db.interview_seen_ids(conn) == {"good"}
+
+
+@respx.mock
+def test_update_without_job_match_keeps_job_and_company(conn, tmp_path, job):
+    mock({"m1": invite_msg("m1", "Invitation: x")})
+    sync(conn, tmp_path)
+    mock({"m2": invite_msg("m2", "Updated invitation: x", sender="Someone <s@unrelated.example>")})
+    sync(conn, tmp_path)
+    [row] = listed(conn)
+    assert row["gmail_id"] == "m2" and row["job_id"] == job and row["company"] == "Hippocratic AI"
+
+
+@respx.mock
+def test_unknown_tzid_falls_back_to_subject_time(conn, tmp_path, job):
+    msg = invite_msg("m1", "Invitation: x @ Mon Nov 9, 2026 11:15am")
+    cal = msg["payload"]["parts"][1]
+    cal["body"]["data"] = b64("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\n"
+                              "DTSTART;TZID=Mars/Olympus:20261109T050000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    mock({"m1": msg})
+    sync(conn, tmp_path)
+    assert listed(conn)[0]["start"] == "2026-11-09T19:15:00+00:00"
+
+
+def test_cli_interview_failure_still_prints_suggestion_summary(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from jobhunt.gmail import interviews, sync
+
+    settings = Settings(db_path=tmp_path / "c.db")
+    monkeypatch.setattr("jobhunt.config.load_settings", lambda: settings)
+    monkeypatch.setattr(sync, "run_sync", lambda *a, **k: sync.SyncReport(4, 1))
+
+    def boom(*a, **k):
+        raise RuntimeError("calendar broke")
+
+    monkeypatch.setattr(interviews, "run_interview_sync", boom)
+    p = argparse.ArgumentParser()
+    sync.register(p.add_subparsers())
+    args = p.parse_args(["gmail-sync"])
+    assert args.handler(args) == 0
+    out = capsys.readouterr().out
+    assert "Checked 4 new emails, 1 suggested" in out and "Couldn't read interviews" in out

@@ -87,3 +87,41 @@ def test_client_get_fetches_ics_attachment():
         json={"data": b64(attached.encode())})
     msg = GmailClient("tok", httpx.Client()).get("m1")
     assert route.called and msg.ics == [inline, attached]
+
+
+def test_local_times_use_real_dst_rules():
+    from zoneinfo import ZoneInfo
+
+    la = ZoneInfo("America/Los_Angeles")
+    jul = parse_subject("Invitation: x @ Mon Jul 6, 2026 11am", NOW, tz=la)
+    dec = parse_subject("Invitation: x @ Mon Dec 7, 2026 11am", NOW, tz=la)
+    assert jul.start.astimezone(timezone.utc).hour == 18
+    assert dec.start.astimezone(timezone.utc).hour == 19
+    [f] = parse_ics(ics(["DTSTART:20260706T110000", "SUMMARY:f"]), tz=la)
+    assert f.start.astimezone(timezone.utc).hour == 18
+
+
+def test_local_tz_default_follows_tz_env(monkeypatch):
+    import time
+
+    from jobhunt.gmail.invites import local_tz
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    i = parse_subject("Invitation: x @ Mon Jul 6, 2026 11am", NOW, tz=local_tz())
+    assert i.start.astimezone(timezone.utc).hour == 18
+    monkeypatch.delenv("TZ")
+    time.tzset()
+
+
+def test_windows_tzid_names_and_unknown_tzid():
+    [a] = parse_ics(ics(["DTSTART;TZID=Pacific Standard Time:20260706T110000"]), tz=timezone.utc)
+    assert a.start.astimezone(timezone.utc).hour == 18 and not a.tz_unknown
+    [b] = parse_ics(ics(["DTSTART;TZID=W. Europe Standard Time:20261207T110000"]), tz=timezone.utc)
+    assert b.start.astimezone(timezone.utc).hour == 10
+    [c] = parse_ics(ics(["DTSTART;TZID=Mars/Olympus:20261207T110000"]), tz=timezone.utc)
+    assert c.tz_unknown and c.start.hour == 11
+
+
+def test_overflow_dtstart_is_skipped():
+    assert parse_ics(ics(["DTSTART:99991231T235959", "SUMMARY:x"]), tz=PST) == []

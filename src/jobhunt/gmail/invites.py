@@ -1,4 +1,5 @@
 """Read calendar invites: .ics VEVENTs, or the Google Calendar subject line as a fallback."""
+import os
 import re
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,10 +15,35 @@ class Invite(BaseModel):
     location: str = ""
     link: str = ""
     cancelled: bool = False
+    tz_unknown: bool = False  # TZID could not be resolved; start/end were read as local time
 
 
-def local_tz() -> tzinfo:
-    return datetime.now().astimezone().tzinfo or timezone.utc
+def local_tz() -> tzinfo | None:
+    """The machine's real timezone (so DST is right for any date), or None when it can't be
+    named; callers then convert each naive datetime with the system's own rules."""
+    name = os.environ.get("TZ", "").lstrip(":")
+    if not name:
+        try:
+            link = os.path.realpath("/etc/localtime")
+            name = link.split("zoneinfo/", 1)[1] if "zoneinfo/" in link else ""
+        except OSError:
+            name = ""
+    try:
+        return ZoneInfo(name) if name else None
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+
+
+def _localize(naive: datetime, tz: tzinfo | None) -> datetime:
+    return naive.replace(tzinfo=tz) if tz else naive.astimezone()
+
+
+_WINDOWS_ZONES = {
+    "pacific standard time": "America/Los_Angeles", "mountain standard time": "America/Denver",
+    "central standard time": "America/Chicago", "eastern standard time": "America/New_York",
+    "gmt standard time": "Europe/London", "w. europe standard time": "Europe/Berlin",
+    "romance standard time": "Europe/Paris", "central europe standard time": "Europe/Budapest",
+}
 
 
 def _unfold(text: str) -> list[str]:
@@ -46,23 +72,34 @@ def _prop(line: str) -> tuple[str, dict[str, str], str] | None:
     return name.upper(), pd, value
 
 
-def _when(value: str, params: dict[str, str], tz: tzinfo) -> datetime | None:
+def _when(value: str, params: dict[str, str], tz: tzinfo | None) -> tuple[datetime, bool] | None:
+    """Returns (aware datetime, tz_unknown) or None when unreadable."""
     value = value.strip()
+    unknown = False
     try:
         if params.get("VALUE") == "DATE" or re.fullmatch(r"\d{8}", value):
             d = datetime.strptime(value[:8], "%Y%m%d").date()
-            return datetime.combine(d, time(9, 0), tzinfo=tz)
-        if value.endswith("Z"):
-            return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-        naive = datetime.strptime(value, "%Y%m%dT%H%M%S")
-    except ValueError:
+            out = _localize(datetime.combine(d, time(9, 0)), tz)
+        elif value.endswith("Z"):
+            out = datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        else:
+            naive = datetime.strptime(value, "%Y%m%dT%H%M%S")
+            name = params.get("TZID", "")
+            zone = None
+            if name:
+                for cand in (name, _WINDOWS_ZONES.get(name.lower(), "")):
+                    try:
+                        zone = ZoneInfo(cand) if cand else None
+                    except (ZoneInfoNotFoundError, ValueError, OSError):
+                        zone = None
+                    if zone:
+                        break
+                unknown = zone is None
+            out = naive.replace(tzinfo=zone) if zone else _localize(naive, tz)
+        out.astimezone(timezone.utc)  # raises OverflowError at the calendar's edges
+    except (ValueError, OverflowError):
         return None
-    if params.get("TZID"):
-        try:
-            return naive.replace(tzinfo=ZoneInfo(params["TZID"]))
-        except (ZoneInfoNotFoundError, ValueError):
-            pass
-    return naive.replace(tzinfo=tz)
+    return out, unknown
 
 
 def parse_ics(text: str, tz: tzinfo | None = None) -> list[Invite]:
@@ -92,10 +129,12 @@ def parse_ics(text: str, tz: tzinfo | None = None) -> list[Invite]:
             first.setdefault(name, (params, value))
         if "DTSTART" not in first:
             continue
-        start = _when(first["DTSTART"][1], first["DTSTART"][0], tz)
-        if start is None:
+        got = _when(first["DTSTART"][1], first["DTSTART"][0], tz)
+        if got is None:
             continue
-        end = _when(first["DTEND"][1], first["DTEND"][0], tz) if "DTEND" in first else None
+        start, unknown = got
+        e = _when(first["DTEND"][1], first["DTEND"][0], tz) if "DTEND" in first else None
+        end = e[0] if e else None
         uid = first["UID"][1].strip() if "UID" in first else None
         if uid and "RECURRENCE-ID" in first:
             uid += "#" + first["RECURRENCE-ID"][1].strip()
@@ -112,7 +151,7 @@ def parse_ics(text: str, tz: tzinfo | None = None) -> list[Invite]:
             uid=uid or None, start=start, end=end,
             summary=_unescape(first.get("SUMMARY", ({}, ""))[1]).strip(),
             location=_unescape(first.get("LOCATION", ({}, ""))[1]).strip(),
-            link=link, cancelled=method == "CANCEL" or status == "CANCELLED"))
+            link=link, cancelled=method == "CANCEL" or status == "CANCELLED", tz_unknown=unknown))
     return out
 
 
@@ -149,10 +188,10 @@ def parse_subject(subject: str, now: datetime, tz: tzinfo | None = None) -> Invi
                    int(m.group("day")))
     except ValueError:
         return None
-    start = datetime.combine(day, t_start, tzinfo=tz)
+    start = _localize(datetime.combine(day, t_start), tz)
     end = None
     if t2 and (t_end := _clock(t2)):
-        end = datetime.combine(day, t_end, tzinfo=tz)
+        end = _localize(datetime.combine(day, t_end), tz)
         if end <= start:
-            end += timedelta(days=1)
+            end = _localize(datetime.combine(day + timedelta(days=1), t_end), tz)
     return Invite(uid=None, start=start, end=end, summary=m.group("summary").strip())

@@ -9,7 +9,7 @@ from .. import db
 from ..config import Settings
 from .auth import access_token
 from .classify import extract_company, match_job
-from .client import GmailClient
+from .client import GmailClient, GmailError
 from .invites import Invite, local_tz, parse_ics, parse_subject
 
 INVITE_QUERY = 'newer_than:{days}d (filename:ics OR subject:(invitation OR invite))'
@@ -23,9 +23,12 @@ def _invites(msg, now: datetime, tz) -> list[Invite]:
     found: list[Invite] = []
     for text in msg.ics:
         found += parse_ics(text, tz)
+    one = parse_subject(msg.subject, now, tz)
     if not found:
-        one = parse_subject(msg.subject, now, tz)
-        found = [one] if one else []
+        return [one] if one else []
+    if one:  # an unreadable TZID: the date in the subject is the better guess
+        found = [i.model_copy(update={"start": one.start, "end": one.end or i.end, "tz_unknown": False})
+                 if i.tz_unknown else i for i in found]
     return found
 
 
@@ -43,17 +46,30 @@ def run_interview_sync(conn, settings: Settings, client: GmailClient | None = No
     for mid in reversed(client.list_ids(INVITE_QUERY.format(days=days))):
         if mid in seen:
             continue
-        msg = client.get(mid)
-        if not (me and parseaddr(msg.sender)[1].lower() == me):
-            job = match_job(jobs, msg.sender, msg.subject, msg.body)
-            company = job["company"] if job else extract_company(msg.sender, msg.subject)
-            for inv in _invites(msg, now, tz):
-                db.upsert_interview(conn, {
-                    "uid": inv.uid or f"gmail:{mid}", "gmail_id": mid,
-                    "job_id": job["id"] if job else None, "company": company,
-                    "start": _utc(inv.start), "end": _utc(inv.end), "summary": inv.summary,
-                    "location": inv.location, "link": inv.link, "sender": msg.sender,
-                    "subject": msg.subject, "status": "cancelled" if inv.cancelled else "scheduled"})
-                changed += 1
+        try:
+            changed += _handle(conn, client, mid, me, jobs, now, tz)
+        except (GmailError, httpx.HTTPError):
+            continue  # transient: try this one again next time, keep going
+        except Exception:  # noqa: BLE001 - one unreadable message must not block the rest
+            pass
         db.mark_interview_seen(conn, mid)
     return changed
+
+
+def _handle(conn, client, mid: str, me: str, jobs: list[dict], now: datetime, tz) -> int:
+    msg = client.get(mid)
+    if me and parseaddr(msg.sender)[1].lower() == me:
+        return 0
+    job = match_job(jobs, msg.sender, msg.subject, msg.body)
+    company = job["company"] if job else extract_company(msg.sender, msg.subject)
+    rows = []
+    for inv in _invites(msg, now, tz):
+        rows.append({
+            "uid": inv.uid or f"gmail:{mid}", "gmail_id": mid,
+            "job_id": job["id"] if job else None, "company": company,
+            "start": _utc(inv.start), "end": _utc(inv.end), "summary": inv.summary,
+            "location": inv.location, "link": inv.link, "sender": msg.sender,
+            "subject": msg.subject, "status": "cancelled" if inv.cancelled else "scheduled"})
+    for row in rows:
+        db.upsert_interview(conn, row)
+    return len(rows)
