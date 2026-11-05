@@ -1,18 +1,15 @@
 """Gemini agents: read the posting, match it to the master, write a draft, judge the rewrites."""
 import json
-import time
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel
 
 from ..config import Settings
-from ..fit.gemini import _short_error
 from .model import Resume
+from .providers import AgentError, Chain, Gemini, build_chain
 
-CALL_TIMEOUT_S = 90  # one Gemini call; without a limit a stalled reply hangs the run forever
-RETRIES = 1  # extra attempts after a timeout or an overloaded / rate-limited reply
-RETRY_DELAY_S = 3
-_sleep = time.sleep
+__all__ = ["AgentError"]  # re-exported: callers catch it from here
 
 # What the user is told each call was doing when it failed.
 _STEP = {
@@ -75,54 +72,16 @@ class Verdicts(BaseModel):
     verdicts: list[Verdict]
 
 
-class AgentError(Exception):
-    pass
-
-
-def make_client(settings: Settings):
-    from google import genai
-
-    from google.genai import types
-
-    return genai.Client(api_key=settings.gemini_api_key,
-                        http_options=types.HttpOptions(timeout=CALL_TIMEOUT_S * 1000))
-
-
-def _is_timeout(exc: Exception) -> bool:
-    return any("Timeout" in t.__name__ for t in type(exc).__mro__)
-
-
-def _is_transient(exc: Exception) -> bool:
-    """Worth one more try: a timeout, an overloaded server, or a rate limit."""
-    code = getattr(exc, "code", None)
-    return _is_timeout(exc) or code in (429, 500, 502, 503, 504)
+def make_client(settings: Settings, on_switch: Callable[[str], None] | None = None) -> Chain | None:
+    """Gemini, then Claude, then OpenRouter: every provider with a key. None if no key is set."""
+    return build_chain(settings, on_switch)
 
 
 def _call(client, settings: Settings, prompt: str, schema: type[BaseModel]):
-    step = _STEP.get(schema.__name__, "calling Gemini")
-    for attempt in range(RETRIES + 1):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": schema,
-                    "temperature": 0.2,
-                },
-            )
-            parsed = response.parsed
-            break
-        except Exception as exc:
-            if _is_transient(exc) and attempt < RETRIES:
-                _sleep(RETRY_DELAY_S)
-                continue
-            if _is_timeout(exc):
-                raise AgentError(f"Gemini didn't answer within {CALL_TIMEOUT_S}s while {step}") from exc
-            raise AgentError(f"{step.capitalize()} failed: {_short_error(exc, settings)}") from exc
-    if not isinstance(parsed, schema):
-        raise AgentError(f"Gemini returned no valid {schema.__name__} while {step}")
-    return parsed
+    """`client` is a provider Chain, or a bare Gemini client (wrapped as a one-provider chain)."""
+    step = _STEP.get(schema.__name__, "calling the model")
+    chain = client if isinstance(client, Chain) else Chain([Gemini(settings, client=client)], settings)
+    return chain.generate(prompt, schema, step)
 
 
 def _master_json(resume: Resume) -> str:

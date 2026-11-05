@@ -48,9 +48,9 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
     if not posting:
         return _fail(conn, job_id, "No posting text")
     if client is None:
-        if not settings.gemini_api_key:
-            return _fail(conn, job_id, "GEMINI_API_KEY not set")
-        client = agents.make_client(settings)
+        client = agents.make_client(settings, on_switch=step)  # Gemini, then Claude, then OpenRouter
+        if client is None:
+            return _fail(conn, job_id, "No AI key set: add GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENROUTER_API_KEY to .env")
 
     try:
         step("Reading your master resume…")

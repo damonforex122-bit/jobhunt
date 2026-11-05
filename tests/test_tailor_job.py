@@ -257,7 +257,7 @@ def test_master_error_is_reported(conn, settings):
 def test_no_key_and_no_posting_messages(conn, settings):
     s = settings.model_copy(update={"gemini_api_key": None})
     j = add_job(conn)
-    assert tailor_job(conn, j, s).error == "GEMINI_API_KEY not set"
+    assert tailor_job(conn, j, s).error == "No AI key set: add GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENROUTER_API_KEY to .env"
     empty = add_job(conn, 2, description="  ")
     assert tailor_job(conn, empty, settings, client=fake()).error == "No posting text"
     assert db.get_resume(conn, empty)["error"] == "No posting text"
@@ -277,7 +277,7 @@ def test_gaps_reported(conn, settings):
 
 def test_tailor_cli_prints_path(tmp_path, settings, monkeypatch, capsys):
     monkeypatch.setattr("jobhunt.config.load_settings", lambda: settings)
-    monkeypatch.setattr(tailor_mod.agents, "make_client", lambda s: fake())
+    monkeypatch.setattr(tailor_mod.agents, "make_client", lambda s, **kw: fake())
     conn = db.connect(settings.db_path)
     j = add_job(conn)
     conn.close()
@@ -317,10 +317,43 @@ def test_progress_stops_at_the_failing_step(conn, settings):
 
 def test_tailor_cli_prints_progress(tmp_path, settings, monkeypatch, capsys):
     monkeypatch.setattr("jobhunt.config.load_settings", lambda: settings)
-    monkeypatch.setattr(tailor_mod.agents, "make_client", lambda s: fake())
+    monkeypatch.setattr(tailor_mod.agents, "make_client", lambda s, **kw: fake())
     conn = db.connect(settings.db_path)
     j = add_job(conn)
     conn.close()
     assert cli.main(["tailor", str(j)]) == 0
     out = capsys.readouterr().out
     assert all(step in out for step in STEPS) and out.index(STEPS[-1]) < out.index("Saved: ")
+
+
+def test_provider_switch_is_reported_as_progress(conn, settings, monkeypatch):
+    from jobhunt.tailor import providers
+    monkeypatch.setattr(providers, "_sleep", lambda s: None)
+
+    class Busy(Exception):
+        code = 503
+
+    class Down:
+        name = "Gemini"
+
+        def generate(self, prompt, schema):
+            raise providers.as_provider_error(Busy("high demand"), settings)
+
+    good = fake()
+
+    class Up:
+        name = "Claude"
+
+        def generate(self, prompt, schema):
+            r = good.generate_content(model="m", contents=prompt, config={"response_schema": schema})
+            return r.parsed
+
+    def make(s, on_switch=None):
+        return providers.Chain([Down(), Up()], s, on_switch)
+
+    monkeypatch.setattr(tailor_mod.agents, "make_client", make)
+    seen = []
+    r = tailor_job(conn, add_job(conn), settings, progress=seen.append)
+    assert r.error is None and r.path
+    assert "Gemini is unavailable — trying Claude…" in seen
+    assert seen.count("Gemini is unavailable — trying Claude…") == 1  # sticks with Claude after

@@ -148,7 +148,7 @@ def test_writer_keeps_hallucinated_evidence_out_of_supported_block():
     assert MUST not in p[:gaps_at] and MUST in p[gaps_at:]
 
 
-# --- time limit, retry, step names -------------------------------------------
+# --- time limit, retry, step names (a bare Gemini client is a one-provider chain) ---
 
 class ReadTimeout(Exception):
     """Named like httpx's timeout errors, which is what the client raises."""
@@ -156,22 +156,14 @@ class ReadTimeout(Exception):
 
 @pytest.fixture
 def no_sleep(monkeypatch):
+    from jobhunt.tailor import providers
     slept = []
-    monkeypatch.setattr(agents, "_sleep", slept.append)
+    monkeypatch.setattr(providers, "_sleep", slept.append)
     return slept
 
 
-def test_make_client_sets_a_time_limit(monkeypatch):
-    seen = {}
-
-    class FakeClient:
-        def __init__(self, **kw):
-            seen.update(kw)
-
-    import google.genai
-    monkeypatch.setattr(google.genai, "Client", FakeClient)
-    agents.make_client(settings())
-    assert seen["http_options"].timeout == agents.CALL_TIMEOUT_S * 1000
+def test_make_client_is_none_without_any_key():
+    assert agents.make_client(Settings()) is None
 
 
 def test_timeout_is_retried_once_then_succeeds(no_sleep):
@@ -181,11 +173,12 @@ def test_timeout_is_retried_once_then_succeeds(no_sleep):
 
 
 def test_timeout_twice_names_the_step(no_sleep):
+    from jobhunt.tailor.providers import CALL_TIMEOUT_S, RETRIES
     fake = FakeGemini({Draft: None}, exc=ReadTimeout("read timed out"))
     with pytest.raises(AgentError) as e:
         agents.write(fake, settings(), sample_resume(), reqs(), matches())
-    assert str(e.value) == f"Gemini didn't answer within {agents.CALL_TIMEOUT_S}s while writing the resume"
-    assert len(fake.calls) == 1 + agents.RETRIES
+    assert str(e.value) == f"Writing the resume failed — Gemini: no answer within {CALL_TIMEOUT_S}s"
+    assert len(fake.calls) == 1 + RETRIES
 
 
 def test_overloaded_503_is_retried(no_sleep):
@@ -201,4 +194,4 @@ def test_other_errors_are_not_retried_and_name_the_step(no_sleep):
     with pytest.raises(AgentError) as e:
         agents.judge(fake, settings(), [("text", ["source"])])
     assert len(fake.calls) == 1 and not no_sleep
-    assert str(e.value).startswith("Checking the rewrites failed: ")
+    assert str(e.value).startswith("Checking the rewrites failed — Gemini: ")

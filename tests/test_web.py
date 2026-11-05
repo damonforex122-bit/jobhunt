@@ -352,7 +352,7 @@ def test_resume_pdf_route_serves_only_recorded_file(settings, tmp_path):
 
 def test_tailor_disabled_without_key(client):
     html = client.get("/jobs/1").text
-    assert "Set GEMINI_API_KEY to tailor" in html and "disabled" in html
+    assert "Set a Gemini, Claude or OpenRouter key to tailor" in html and "disabled" in html
     assert 'hx-post="/jobs/1/resume"' not in html
 
 

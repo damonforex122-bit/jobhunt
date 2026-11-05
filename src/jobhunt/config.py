@@ -9,6 +9,11 @@ class Settings(BaseModel):
     db_path: Path = Path("data/jobhunt.db")
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
+    # Backup providers for resume tailoring, tried in this order when Gemini fails.
+    anthropic_api_key: str | None = None
+    claude_model: str = "claude-opus-5-5"
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "openai/gpt-5-mini"
     apollo_api_key: str | None = None
     exa_api_key: str | None = None
     watchlist_path: Path = Path("config/watchlist.yaml")

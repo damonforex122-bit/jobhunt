@@ -43,9 +43,15 @@ Grading, import and scan never move a job that is already in the pipeline.
 `RESUME_OUTPUT_DIR`) as `Georgia Liu - Resume.pdf`. If that name is taken by a file you made, it is never
 overwritten: the new one is `Georgia Liu - Resume (<Job title>).pdf`. Re-running a job replaces only its own file.
 
-**No invention.** Gemini may only select and reword what is in your master. Every rewritten bullet is checked
-for new numbers and new capitalised terms, then by a second Gemini pass; anything that fails keeps your
-original wording. The command lists the requirements your master doesn't support (**Gaps**) and the
+**Providers.** Tailoring tries Gemini first, then Claude (`ANTHROPIC_API_KEY`, model `CLAUDE_MODEL`, default
+`claude-opus-5-5`), then OpenRouter (`OPENROUTER_API_KEY`, model `OPENROUTER_MODEL`, default `openai/gpt-5-mini`).
+Only providers with a key are used. A timeout (90s; 180s for Claude) or an overloaded/rate-limited reply is
+retried once, then the next provider takes over and is kept for the rest of the run. The command prints each
+step and any switch, e.g. "Gemini is unavailable — trying Claude…".
+
+**No invention.** The model may only select and reword what is in your master. Every rewritten bullet is
+checked for new numbers and new capitalised terms, then by a second model pass; anything that fails keeps
+your original wording. The command lists the requirements your master doesn't support (**Gaps**) and the
 bullets where it **kept your original wording**. If anything goes wrong, no file is written.
 Tailoring never changes the job's status.
 

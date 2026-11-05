@@ -20,6 +20,7 @@ from ..gmail.auth import GmailNotConnected
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE
 from ..people.finder import find_people
 from ..tailor import tailor_job
+from ..tailor.providers import has_ai_key
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -117,7 +118,7 @@ def create_app(settings: Settings) -> FastAPI:
         return dict(job=job, fit=db.get_fit(conn, job["id"]),
                     people=db.list_people(conn, job["company"]),
                     resume=db.get_resume(conn, job["id"]),
-                    can_tailor=bool(settings.gemini_api_key), output_dir=settings.resume_output_dir,
+                    can_tailor=has_ai_key(settings), output_dir=settings.resume_output_dir,
                     **extra)
 
     @app.get("/", response_class=HTMLResponse)
