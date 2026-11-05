@@ -22,6 +22,7 @@ from ..fit import grade_job
 from ..gmail import interviews as gmail_interviews
 from ..gmail import sync as gmail_sync
 from ..gmail.auth import GmailNotConnected
+from ..gmail.connect import gmail_connected
 from ..gmail.invites import local_tz
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
@@ -35,7 +36,8 @@ from . import review
 MAX_MASTER_BYTES = 10 * 1024 * 1024
 SHA_RE = re.compile(r"[0-9a-f]{64}")
 KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
-              "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa"}
+              "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa",
+              "gmail_app_password": "Gmail app password"}
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -283,7 +285,7 @@ def create_app(settings: Settings) -> FastAPI:
         return render(request, "pipeline.html", board=db.pipeline_board(conn),
                       pipeline=PIPELINE, closed=CLOSED,
                       suggestions=db.list_gmail_suggestions(conn),
-                      gmail_connected=settings.gmail_token.exists(),
+                      gmail_connected=gmail_connected(settings),
                       upcoming_interviews=len(db.list_interviews(conn, now=_now_iso())))
 
     @app.get("/pipeline/board", response_class=HTMLResponse)
@@ -301,7 +303,7 @@ def create_app(settings: Settings) -> FastAPI:
         upcoming = [r for r in rows if (r["start"] or "") >= now]
         past = [r for r in rows if (r["start"] or "") < now][::-1]
         return render(request, "interviews.html", upcoming=upcoming, past=past,
-                      gmail_connected=settings.gmail_token.exists())
+                      gmail_connected=gmail_connected(settings))
 
     @app.post("/gmail/sync")
     def post_gmail_sync(conn: Conn, syncer: Annotated[Callable, Depends(get_gmail_sync)],
@@ -382,7 +384,8 @@ def create_app(settings: Settings) -> FastAPI:
                       output_dir=profile_store.effective_output_dir(conn, settings),
                       file_name=profile_store.get_file_name(conn) or "",
                       ai_notes=profile_store.get_ai_notes(conn),
-                      prefs=profile_store.effective_preferences(conn, settings), keys=keys)
+                      prefs=profile_store.effective_preferences(conn, settings), keys=keys,
+                      gmail_address=settings.gmail_address or "")
 
     @app.post("/profile/links")
     def post_profile_links(conn: Conn, website: Annotated[str, Form()] = "",
@@ -437,6 +440,9 @@ def create_app(settings: Settings) -> FastAPI:
                 value = value.strip() if isinstance(value, str) else value
                 if isinstance(value, str) and value:
                     changes[f.upper()] = value
+        address = form.get("gmail_address")
+        if isinstance(address, str) and address.strip() != (settings.gmail_address or ""):
+            changes["GMAIL_ADDRESS"] = address.strip() or None
         if not changes:
             return to_profile("No key changes.")
         try:

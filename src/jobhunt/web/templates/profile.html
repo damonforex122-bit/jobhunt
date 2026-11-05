@@ -66,6 +66,8 @@
 {% if k.masked %}<label class="label cursor-pointer justify-start gap-2"><input type="checkbox" class="checkbox checkbox-sm" name="remove_{{ k.field }}"><span class="label-text">Remove</span></label>{% endif %}
 </div>
 {% endfor %}
+<label class="form-control"><span class="label-text">Gmail address (for the app password above)</span>
+<input class="input input-bordered w-full" type="email" name="gmail_address" value="{{ gmail_address }}" autocomplete="off"></label>
 <button class="btn btn-primary">Save keys</button>
 </form>
 </div></div>

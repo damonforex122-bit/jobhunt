@@ -7,7 +7,7 @@ import httpx
 
 from .. import db
 from ..config import Settings
-from .auth import access_token
+from .connect import close_client, make_gmail_client
 from .classify import extract_company, match_job
 from .client import GmailClient, GmailError
 from .invites import Invite, local_tz, parse_ics, parse_subject
@@ -35,7 +35,11 @@ def _invites(msg, now: datetime, tz) -> list[Invite]:
 def run_interview_sync(conn, settings: Settings, client: GmailClient | None = None, days: int = 30,
                        *, tz=None, now: datetime | None = None) -> int:
     if client is None:
-        client = GmailClient(access_token(settings), httpx.Client())
+        client = make_gmail_client(settings)
+        try:
+            return run_interview_sync(conn, settings, client, days, tz=tz, now=now)
+        finally:
+            close_client(client)
     tz = tz or local_tz()
     now = now or datetime.now(tz)
     me = client.profile_email().lower()

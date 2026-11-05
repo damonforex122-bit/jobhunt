@@ -8,7 +8,7 @@
 <h1 class="text-2xl font-bold">Interviews</h1>
 <div class="flex items-center gap-2">
 <form method="post" action="/gmail/sync"><input type="hidden" name="next" value="/interviews"><button class="btn btn-primary btn-sm">Sync Gmail</button></form>
-{% if not gmail_connected %}<span class="text-sm opacity-60">Not connected yet: run <code>uv run jobhunt gmail-auth</code> (see README, "Gmail setup").</span>{% endif %}
+{% if not gmail_connected %}<span class="text-sm opacity-60">Not connected yet — <a class="link" href="/setup?step=gmail">connect Gmail</a></span>{% endif %}
 </div>
 {% if upcoming %}<div class="overflow-x-auto"><table class="table table-zebra"><thead><tr><th>When</th><th>Job</th><th>Invite</th><th></th></tr></thead><tbody>
 {{ rows(upcoming) }}

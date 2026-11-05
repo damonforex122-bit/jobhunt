@@ -20,6 +20,8 @@ class Settings(BaseModel):
     # Gmail (read-only). Both files live in data/, which git ignores.
     gmail_client_secret: Path = Path("data/gmail_client_secret.json")
     gmail_token: Path = Path("data/gmail_token.json")
+    gmail_address: str | None = None
+    gmail_app_password: str | None = None
     master_resume_path: Path | None = None
     resume_output_dir: Path = Path("~/Documents/jobhunt/Resumes").expanduser()
     env_path: Path = Path(".env")
@@ -32,7 +34,7 @@ class Settings(BaseModel):
 
 
 KEY_FIELDS = ("gemini_api_key", "anthropic_api_key", "openrouter_api_key", "apollo_api_key",
-              "exa_api_key")
+              "exa_api_key", "gmail_app_password")
 
 
 def short_error(exc: Exception) -> str:

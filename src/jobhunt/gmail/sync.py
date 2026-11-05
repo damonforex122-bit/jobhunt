@@ -6,7 +6,8 @@ import httpx
 
 from .. import db
 from ..config import Settings, short_error
-from .auth import GmailNotConnected, access_token, run_auth
+from .auth import GmailNotConnected, run_auth
+from .connect import close_client, make_gmail_client
 from email.utils import parseaddr
 
 from .classify import classify, extract_company, is_ats_sender, match_job, should_suggest
@@ -31,7 +32,11 @@ def run_sync(conn, settings: Settings, client: GmailClient | None = None, days: 
              limit: int = 200, recheck: bool = False) -> SyncReport:
     """`recheck` re-reads every email not yet accepted or dismissed (after the rules change)."""
     if client is None:
-        client = GmailClient(access_token(settings), httpx.Client())
+        client = make_gmail_client(settings)
+        try:
+            return run_sync(conn, settings, client, days, limit, recheck)
+        finally:
+            close_client(client)
     me = client.profile_email().lower()
     seen = db.gmail_seen_ids(conn, settled_only=recheck)
     jobs = db.jobs_for_matching(conn)

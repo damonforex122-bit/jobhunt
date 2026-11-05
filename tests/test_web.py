@@ -287,7 +287,7 @@ def test_unknown_suggestion_404(client):
 
 def test_gmail_sync_not_connected_flashes_setup_hint(client):
     r = client.post("/gmail/sync")
-    assert r.status_code == 200 and "gmail-auth" in r.text
+    assert r.status_code == 200 and "Connect Gmail on the Setup page" in r.text
 
 
 def test_gmail_sync_reports_counts(settings):
@@ -646,3 +646,19 @@ def test_drop_on_board_changes_status_seen_by_jobs_list(client, settings):
 def test_pages_refresh_when_tab_regains_focus(client):
     assert 'data-refresh-on-focus="#jobs-table"' in client.get("/").text
     assert 'data-refresh-on-focus="#board"' in client.get("/pipeline").text
+
+
+def test_profile_keys_save_gmail_app_password_and_address(client, settings):
+    page = client.get("/profile").text
+    assert 'name="gmail_app_password"' in page and 'name="gmail_address"' in page
+    client.post("/profile/keys", data={"gmail_address": "me@gmail.com", "gmail_app_password": "abcdpw"})
+    env = settings.env_path.read_text()
+    assert "GMAIL_ADDRESS=me@gmail.com" in env and "GMAIL_APP_PASSWORD=abcdpw" in env
+    page = client.get("/profile").text
+    assert "abcdpw" not in page and 'value="me@gmail.com"' in page
+    assert "connect Gmail" not in client.get("/pipeline").text
+
+
+def test_not_connected_links_to_setup(client):
+    assert 'href="/setup?step=gmail">connect Gmail</a>' in client.get("/interviews").text
+    assert 'href="/setup?step=gmail">connect Gmail</a>' in client.get("/pipeline").text
