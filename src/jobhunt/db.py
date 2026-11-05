@@ -268,6 +268,9 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return _job_row(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
 
 
+SCAN_SOURCES = ("greenhouse", "ashby", "lever")  # what sources/ats.py stores for scanned jobs
+
+
 def list_jobs(
     conn: sqlite3.Connection,
     *,
@@ -279,7 +282,10 @@ def list_jobs(
     tz=None,
 ) -> list[dict]:
     where, args = [], []
-    if source is not None:
+    if source == "scan":
+        where.append(f"j.source IN ({','.join('?' * len(SCAN_SOURCES))})")
+        args.extend(SCAN_SOURCES)
+    elif source is not None:
         where.append("j.source = ?")
         args.append(source)
     if status is not None:
@@ -646,11 +652,16 @@ def today_summary(conn: sqlite3.Connection, today: date, tz=None) -> dict:
     interviews, today's digest run id and the last run of each kind."""
     new_by_source: dict[str, int] = {}
     for j in list_jobs(conn, added_on=today, tz=tz):
-        k = j.get("source") or "other"
+        k = "scan" if j.get("source") in SCAN_SOURCES else (j.get("source") or "other")
         new_by_source[k] = new_by_source.get(k, 0) + 1
     new_by_source = dict(sorted(new_by_source.items(), key=lambda kv: (-kv[1], kv[0])))
-    moved = sum(1 for e in conn.execute("SELECT status, at FROM job_events").fetchall()
-                if e["status"] in PIPELINE + CLOSED and _local_date(e["at"], tz) == today)
+    moved, prev_job, prev_status = 0, None, None
+    for e in conn.execute("SELECT job_id, status, at FROM job_events ORDER BY job_id, id"):
+        first = e["job_id"] != prev_job
+        changed = first or e["status"] != prev_status  # a note-only event repeats the status
+        prev_job, prev_status = e["job_id"], e["status"]
+        if changed and e["status"] in PIPELINE + CLOSED and _local_date(e["at"], tz) == today:
+            moved += 1
     digest_id = None
     for r in conn.execute("SELECT id, path FROM runs WHERE kind = 'digest' ORDER BY id"):
         if Path(r["path"] or "").stem == today.isoformat():
@@ -663,10 +674,18 @@ def today_summary(conn: sqlite3.Connection, today: date, tz=None) -> dict:
 def last_morning_run(conn: sqlite3.Connection, tz=None) -> dict | None:
     """{'at': datetime, 'ok': bool} for the newest run's local day, or None when nothing ran.
     A step error that starts with 'skipped: ' is not a failure."""
-    runs = last_runs(conn).values()
-    if not runs:
+    def _started(r: dict) -> datetime | None:
+        try:
+            at = datetime.fromisoformat(r["started_at"])
+        except (TypeError, ValueError):
+            return None
+        return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+    parsed = [(t, r) for r in last_runs(conn).values() if r["kind"] != "digest"
+              if (t := _started(r)) is not None]
+    if not parsed:
         return None
-    newest = max(runs, key=lambda r: r["started_at"])
+    newest = max(parsed, key=lambda tr: tr[0])[1]
     day = _local_date(newest["started_at"], tz)
     steps = runs_on(conn, day, tz)
     ok = all(not r["error"] or r["error"].startswith("skipped: ") for r in steps)

@@ -56,7 +56,11 @@ def install(at: str = "08:00", *, agents_dir: Path | None = None, runner=subproc
         plistlib.dump(plist_dict(entry, workdir, hour, minute, log_path), f)
     domain = f"gui/{os.getuid()}"
     runner(["launchctl", "bootout", domain, str(path)], check=False, capture_output=True)
-    runner(["launchctl", "bootstrap", domain, str(path)], check=True)
+    try:
+        runner(["launchctl", "bootstrap", domain, str(path)], check=True)
+    except BaseException:
+        path.unlink(missing_ok=True)  # don't leave a plist that --status would call scheduled
+        raise
     return path
 
 

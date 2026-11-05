@@ -86,14 +86,21 @@ def parse_job_history(text: str) -> list[ImportedJob]:
     return results
 
 
-def parse_job_dir(path: Path) -> tuple[str | None, list[Person]]:
+def _read_inside(file: Path, root: Path) -> str | None:
+    """File text, or None when missing or resolving outside `root` (e.g. a symlink)."""
+    if not file.is_file() or not file.resolve().is_relative_to(root.resolve()):
+        return None
+    return file.read_text(errors="replace")
+
+
+def parse_job_dir(path: Path, root: Path | None = None) -> tuple[str | None, list[Person]]:
     path = Path(path)
-    posting_file = path / "posting.md"
-    posting = posting_file.read_text() if posting_file.is_file() else None
+    root = Path(root) if root is not None else path
+    posting = _read_inside(path / "posting.md", root)
     people: list[Person] = []
-    people_file = path / "people.md"
-    if people_file.is_file():
-        for line in people_file.read_text().splitlines():
+    people_text = _read_inside(path / "people.md", root)
+    if people_text is not None:
+        for line in people_text.splitlines():
             m = PERSON_RE.match(line)
             if not m:
                 continue
@@ -128,19 +135,27 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
     run_id = start_run(conn, "import", str(root))
     try:
         history = root / "job-history.md"
-        if not root.is_dir():
-            raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
-        if not history.is_file():
-            raise ImportSourceError(f"job-history.md not found in {root}")
-        rows = parse_job_history(history.read_text())
-        extra = root / "_history-add.md"
-        if extra.is_file():
-            rows += parse_job_history(extra.read_text())
+        denied = (f"Can't read {root}: permission denied (macOS may block background access to "
+                  "~/Documents — see README)")
+        try:
+            if not root.is_dir():
+                raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
+            if not history.is_file():
+                raise ImportSourceError(f"job-history.md not found in {root}")
+            rows = parse_job_history(history.read_text())
+            extra = root / "_history-add.md"
+            if extra.is_file():
+                rows += parse_job_history(extra.read_text())
+        except PermissionError as e:
+            raise ImportSourceError(denied) from e
         by_url: dict[str, ImportedJob] = {}
         for item in rows:  # document order: a later row for the same URL wins
             by_url[normalize_url(item.job.url)] = item
         jobs_root = root / "jobs"
-        dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
+        try:
+            dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
+        except PermissionError as e:
+            raise ImportSourceError(denied) from e
 
         for url, item in by_url.items():
             job = item.job
@@ -153,14 +168,19 @@ def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
 
             job_dir = _find_job_dir(dirs, job)
             people: list[Person] = []
+            posting = None
             if job_dir is not None:
-                posting, people = parse_job_dir(job_dir)
+                posting, people = parse_job_dir(job_dir, root)
+            existing = conn.execute("SELECT id, description FROM jobs WHERE url = ?", (url,)).fetchone()
+            if existing is None:
                 if posting:
-                    row = conn.execute("SELECT description FROM jobs WHERE url = ?", (url,)).fetchone()
-                    if row is None or not (row["description"] or "").strip():
-                        job = job.model_copy(update={"description": posting})
-
-            job_id, is_new = upsert_job(conn, job)
+                    job = job.model_copy(update={"description": posting})
+                job_id, is_new = upsert_job(conn, job)
+            else:  # a re-import never rewrites title/company/etc; it only fills an empty description
+                job_id, is_new = existing["id"], False
+                if posting and not (existing["description"] or "").strip():
+                    conn.execute("UPDATE jobs SET description = ? WHERE id = ?", (posting, job_id))
+                    conn.commit()
             counts["jobs"] += 1
             counts["new"] += int(is_new)
             cur = conn.execute("SELECT status, prof_score, prof_reason FROM jobs WHERE id = ?",
@@ -222,6 +242,9 @@ def register(sub) -> None:
             print(run_import(conn, directory))
         except (ImportSourceError, OSError) as e:
             print(f"error: {short_error(e)}")
+            return 1
+        except Exception as e:
+            print(f"error: import failed: {short_error(e)}")
             return 1
         finally:
             conn.close()

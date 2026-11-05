@@ -171,3 +171,51 @@ def test_blank_date_note_has_no_parens(conn, tmp_path):
     ev = conn.execute("SELECT note FROM job_events WHERE job_id = ? ORDER BY id DESC",
                       (jid(conn, 1),)).fetchone()
     assert ev["note"] == "From Proficiently"
+
+
+def test_reimport_keeps_scanned_title_and_company(conn, tmp_path):
+    from jobhunt.models import Job
+
+    db.upsert_job(conn, Job(company="Real Co", title="Real Title", url=f"{H}1", source="ashby"))
+    run_import(conn, make_proficiently(tmp_path / "p", history_rows=[row(1, Role="Other Title")]))
+    j = db.get_job(conn, jid(conn, 1))
+    assert (j["title"], j["company"], j["prof_score"]) == ("Real Title", "Real Co", 7)
+
+
+def test_non_utf8_posting_still_imports(conn, tmp_path):
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1), row(2)],
+                             folders={"acme1-role-1-2026-10-30": {}, "acme2-role-2-2026-10-30": {"posting.md": "ok"}})
+    (root / "jobs" / "acme1-role-1-2026-10-30" / "posting.md").write_bytes(b"hello \xff world")
+    run_import(conn, root)
+    assert "hello" in db.get_job(conn, jid(conn, 1))["description"]
+    assert db.get_job(conn, jid(conn, 2))["description"] == "ok"
+
+
+def test_posting_symlinked_outside_root_not_read(conn, tmp_path):
+    outside = tmp_path / "secret.md"
+    outside.write_text("secret")
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1)],
+                             folders={"acme1-role-1-2026-10-30": {}})
+    (root / "jobs" / "acme1-role-1-2026-10-30" / "posting.md").symlink_to(outside)
+    run_import(conn, root)
+    assert not (db.get_job(conn, jid(conn, 1))["description"] or "").strip()
+
+
+def test_unreadable_dir_reports_permission_denied(conn, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    import pytest
+
+    from jobhunt.importer import ImportSourceError
+
+    root = make_proficiently(tmp_path / "p", history_rows=[row(1)])
+    real = Path.read_text
+
+    def boom(self, *a, **k):
+        if self.name == "job-history.md":
+            raise PermissionError(1, "Operation not permitted")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    with pytest.raises(ImportSourceError, match="permission denied"):
+        run_import(conn, root)

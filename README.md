@@ -28,6 +28,13 @@ uv run jobhunt gmail-sync [--days 30]   # suggest pipeline moves from recent rec
 uv run jobhunt serve     # web UI at http://127.0.0.1:8000
 ```
 
+### Daily morning run
+
+`uv run jobhunt daily --install [--at HH:MM]` schedules the morning run with launchd. After installing, run it once with
+`launchctl kickstart -k gui/$(id -u)/com.jobhunt.daily` and check `uv run jobhunt daily --status`. If the import step
+says "permission denied", macOS is blocking background access to `~/Documents`: allow Full Disk Access for the
+`jobhunt` entry point, or move `PROFICIENTLY_DIR` somewhere else.
+
 ### Application pipeline
 
 Stages: `applied` → `screening` → `interviewing` → `offer`, closed as `accepted`, `rejected` or `withdrawn`.

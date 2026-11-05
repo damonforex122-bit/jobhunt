@@ -95,3 +95,17 @@ def test_cli_install_bad_time_fails_cleanly(project, capsys):
     assert cli.main(["daily", "--install", "--at", "99:99"]) == 1
     assert "HH:MM" in capsys.readouterr().out
     assert not (project[0] / "agents").exists()
+
+
+def test_install_removes_plist_when_bootstrap_fails(project):
+    tmp_path, _ = project
+    agents = tmp_path / "agents"
+
+    def runner(cmd, **kw):
+        if "bootstrap" in cmd:
+            raise subprocess.CalledProcessError(5, cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        launchd.install(agents_dir=agents, runner=runner)
+    assert launchd.installed(agents) is None
