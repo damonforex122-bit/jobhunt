@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS master_cache (
     resume_json TEXT,
     parsed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS resumes (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+    path TEXT,
+    master_sha256 TEXT,
+    created_at TEXT,
+    gaps_json TEXT,
+    fallbacks_json TEXT,
+    error TEXT
+);
 """
 
 _JOB_UPDATE_FIELDS = (
@@ -404,3 +413,30 @@ def save_master_cache(conn: sqlite3.Connection, sha: str, resume_json: str) -> N
         "INSERT OR REPLACE INTO master_cache (sha256, resume_json, parsed_at) VALUES (?, ?, ?)",
         (sha, resume_json, _now()))
     conn.commit()
+
+
+# --- tailored resume: per-job output record --------------------------------
+
+def save_resume(conn: sqlite3.Connection, rec: dict) -> None:
+    conn.execute(
+        """INSERT OR REPLACE INTO resumes
+           (job_id, path, master_sha256, created_at, gaps_json, fallbacks_json, error)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (rec["job_id"], rec.get("path"), rec.get("master_sha256"), _now(),
+         json.dumps(rec.get("gaps") or []), json.dumps(rec.get("fallbacks") or []),
+         rec.get("error")))
+    conn.commit()
+
+
+def get_resume(conn: sqlite3.Connection, job_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM resumes WHERE job_id = ?", (job_id,)).fetchone()
+    if row is None:
+        return None
+    rec = dict(row)
+    rec["gaps"] = json.loads(rec.pop("gaps_json") or "[]")
+    rec["fallbacks"] = json.loads(rec.pop("fallbacks_json") or "[]")
+    return rec
+
+
+def resume_paths(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT path FROM resumes WHERE path IS NOT NULL")}

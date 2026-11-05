@@ -19,6 +19,7 @@ Run all commands from the repo root (`data/` and `config/` paths are relative to
 uv run jobhunt import    # load jobs/companies/preferences from the Proficiently folder
 uv run jobhunt scan      # scan watchlist + known ATS boards (Greenhouse, Ashby, Lever)
 uv run jobhunt fit <id> | --all-new   # grade one job, or every 'new' job (keyword score always; Gemini score with a key)
+uv run jobhunt tailor <id>   # tailor the master resume PDF to a job (needs GEMINI_API_KEY)
 uv run jobhunt people <job_id>   # find likely hiring managers for a job
 uv run jobhunt status <id> applied --note "Referred by Sam"   # move a job to a pipeline stage
 uv run jobhunt pipeline [--all]   # jobs by stage (--all adds accepted/rejected/withdrawn)
@@ -33,6 +34,20 @@ Stages: `applied` → `screening` → `interviewing` → `offer`, closed as `acc
 Change a job's stage on its page (with an optional note) or with `jobhunt status`. Every change is
 logged with its date; the job page shows the history and the **Pipeline** page shows a board.
 Grading, import and scan never move a job that is already in the pipeline.
+
+### Tailored resumes
+
+`jobhunt tailor <id>` reads the job posting, matches it to your master resume
+(`~/Documents/Resume/Georgia Liu - Master Resume.pdf`, override with `MASTER_RESUME_PATH`), and renders a
+2-page PDF in the master's layout. Files go to `~/Documents/Resume/<Company>/` (override with
+`RESUME_OUTPUT_DIR`) as `Georgia Liu - Resume.pdf`. If that name is taken by a file you made, it is never
+overwritten: the new one is `Georgia Liu - Resume (<Job title>).pdf`. Re-running a job replaces only its own file.
+
+**No invention.** Gemini may only select and reword what is in your master. Every rewritten bullet is checked
+for new numbers and new capitalised terms, then by a second Gemini pass; anything that fails keeps your
+original wording. The command lists the requirements your master doesn't support (**Gaps**) and the
+bullets where it **kept your original wording**. If anything goes wrong, no file is written.
+Tailoring never changes the job's status.
 
 To start clean, delete `data/jobhunt.db`, then run `uv run jobhunt import && uv run jobhunt scan`.
 

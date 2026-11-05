@@ -87,15 +87,17 @@ def sample_resume() -> Resume:
 class FakeGemini:
     """Stand-in for genai.Client: returns a canned parsed object per response schema."""
 
-    def __init__(self, responses: dict | None = None, exc: Exception | None = None):
+    def __init__(self, responses: dict | None = None, exc: Exception | None = None,
+                 raise_on: type | None = None):
         self.responses = responses or {}
         self.exc = exc
+        self.raise_on = raise_on
         self.calls: list[dict] = []
         self.models = self
 
     def generate_content(self, **kw):
         self.calls.append(kw)
-        if self.exc:
+        if self.exc and (self.raise_on is None or kw["config"]["response_schema"] is self.raise_on):
             raise self.exc
         parsed = self.responses.get(kw["config"]["response_schema"])
         return type("R", (), {"parsed": parsed})()

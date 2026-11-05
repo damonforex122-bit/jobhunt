@@ -69,3 +69,7 @@ REGISTRARS.append(pipeline.register)
 from .gmail import sync as gmail_sync  # noqa: E402
 
 REGISTRARS.append(gmail_sync.register)
+
+from . import tailor  # noqa: E402
+
+REGISTRARS.append(tailor.register)
