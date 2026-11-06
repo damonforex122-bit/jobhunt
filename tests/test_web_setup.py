@@ -321,9 +321,34 @@ def test_serve_prechecks_port(monkeypatch, capsys):
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: called.append(1))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
+        s.listen()  # a running server: busy even for a probe with SO_REUSEADDR
         port = s.getsockname()[1]
         assert cli.main(["serve", "--port", str(port)]) == 1
     assert "is busy" in capsys.readouterr().out and not called
+
+
+def test_serve_port_probe_sets_reuseaddr_before_bind(monkeypatch):
+    import socket
+
+    import uvicorn
+    events = []
+    real = socket.socket
+
+    class Spy(real):
+        def setsockopt(self, level, opt, value):
+            events.append(("setsockopt", level, opt, value))
+            return super().setsockopt(level, opt, value)
+
+        def bind(self, addr):
+            events.append(("bind",))
+            return super().bind(addr)
+    monkeypatch.setattr(socket, "socket", Spy)
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    with real() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    assert cli.main(["serve", "--port", str(port)]) == 0
+    assert events[:2] == [("setsockopt", socket.SOL_SOCKET, socket.SO_REUSEADDR, 1), ("bind",)]
 
 
 def test_serve_open_starts_timer(monkeypatch):

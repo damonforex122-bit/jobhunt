@@ -77,7 +77,8 @@ def _register_serve(sub) -> None:
             return 1
 
         probe = socket.socket()
-        try:
+        try:  # SO_REUSEADDR like uvicorn, so a just-stopped server's TIME_WAIT doesn't look busy
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(("127.0.0.1", port))
         except OSError as e:
             if e.errno == errno.EADDRINUSE:
