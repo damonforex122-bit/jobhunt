@@ -275,13 +275,14 @@ Set `PROFICIENTLY_DIR` in `.env` to the export folder (usually `~/Documents/Resu
 uv run jobhunt import
 ```
 
-This loads your earlier jobs and companies, plus your preferences. Jobs below your salary floor are dropped. Unclear
-location or salary is kept and flagged. Jobs and files Proficiently prepared show on each job's page.
+This loads your earlier jobs (with their status and score), their companies and the people Proficiently found.
+Postings and files Proficiently prepared show on each job's page. Until you save preferences on the Profile page,
+the app reads them from this folder.
 
 ### Moving over from the original install
 
-`uv run jobhunt migrate-profile` carries an older single-user install's resume path, output folder, preferences
-and notes into the new settings. It is safe to run again, and it never writes inside the old folders.
+`uv run jobhunt migrate-profile` carries an older single-user install's resume path, output folder, Proficiently
+folder and notes into the new settings. It is safe to run again, and it never writes inside the old folders.
 New users do not need it.
 
 ### Settings
@@ -303,8 +304,8 @@ to `.env` to edit them by hand. Empty values count as unset.
 | `GMAIL_APP_PASSWORD` | Gmail app password (read-only access). | none |
 | `GMAIL_CLIENT_SECRET` | Google OAuth client file (Advanced). | `data/gmail_client_secret.json` |
 | `GMAIL_TOKEN` | Google OAuth token file (Advanced). | `data/gmail_token.json` |
-| `MASTER_RESUME_PATH` | Use this resume PDF instead of the uploaded one. | none |
-| `RESUME_OUTPUT_DIR` | Where tailored resumes are saved. | `~/Documents/jobhunt/Resumes` |
+| `MASTER_RESUME_PATH` | A resume PDF to use, only when no resume has been uploaded. | none |
+| `RESUME_OUTPUT_DIR` | Default folder for tailored resumes. A folder saved in the wizard or on the Profile page wins. | `~/Documents/jobhunt/Resumes` |
 | `DB_PATH` | The database file. | `data/jobhunt.db` |
 | `WATCHLIST_PATH` | Extra companies to scan, as YAML. | `config/watchlist.yaml` |
 | `PROFICIENTLY_DIR` | Proficiently export folder (read-only). | none |

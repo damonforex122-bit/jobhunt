@@ -289,3 +289,14 @@ def test_profile_file_name_field_and_relative_output_rejected(web):
     conn = db.connect(s.db_path)
     assert profile_store.get_file_name(conn) == "Jane D"
     conn.close()
+
+
+# --- README claims match the code ----------------------------------------------------------------
+
+def test_readme_settings_and_import_claims():
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    rows = {line.split("|")[1].strip(" `"): line for line in text.splitlines() if line.startswith("| `")}
+    assert "only when no resume has been uploaded" in rows["MASTER_RESUME_PATH"]
+    assert "Profile" in rows["RESUME_OUTPUT_DIR"] and "wizard" in rows["RESUME_OUTPUT_DIR"]
+    assert "salary floor are dropped" not in text and "plus your preferences" not in text
+    assert "output folder, preferences" not in text  # migrate-profile no longer copies preferences
