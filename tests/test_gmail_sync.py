@@ -155,7 +155,7 @@ NEWS = message("n1", "TLDR <dan@tldrnewsletter.com>", "Exa raises; OpenAI news",
                extra=[("List-Unsubscribe", "<mailto:u@tldr.com>")])
 ATS_BULK = message("a1", "Harvey Recruiting <no-reply@ashbyhq.com>", "Next steps with Harvey",
                    "phone screen", extra=[("List-Unsubscribe", "<mailto:u@ashbyhq.com>")])
-MINE = message("s1", "Georgia <me@gmail.com>", "Re: Exa onsite", "See you at the onsite")
+MINE = message("s1", "Alex Sample <me@gmail.com>", "Re: Exa onsite", "See you at the onsite")
 NEWCO = message("c1", "Robyn <robyn@hippocraticai.com>",
                 "Invitation: Interview with Hippocratic AI @ Mon Nov 9", "calendar")
 NEWCO_EARLY = message("c2", "Hippocratic AI Hiring Team <no-reply@ashbyhq.com>",

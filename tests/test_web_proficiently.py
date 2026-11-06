@@ -8,7 +8,7 @@ from jobhunt.config import Settings
 from jobhunt.models import Fit, Job, Person
 from jobhunt.web import app as webapp
 
-SHEET = "# Apply\n\n## NEEDS GEORGIA\n- Upload transcript\n- Answer visa question\n\n## OTHER\n- not this\n"
+SHEET = "# Apply\n\n## NEEDS ALEX\n- Upload transcript\n- Answer visa question\n\n## OTHER\n- not this\n"
 
 
 def tc(app):

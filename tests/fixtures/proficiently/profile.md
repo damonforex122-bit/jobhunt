@@ -3,7 +3,7 @@
 *Last updated: 2026-10-29*
 
 ## Candidate Overview
-**Name**: Georgia (Ning-Yuan) Liu, PhD
+**Name**: Alex (Sam) Sample, PhD
 **Core expertise**: LLM-based knowledge extraction, causal graphs, and evals for qualitative text. Builds zero-to-one products and research benchmarks end to end. PhD in Industrial & Systems Engineering (system dynamics), MS Computer Science (AI/ML).
 **Career throughline**: Systems-engineering PhD, then human-automation research, then LLMs for causal reasoning at Google X and Harvard/MGH, then founding Causena to productionize that research.
 

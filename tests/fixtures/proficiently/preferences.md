@@ -22,6 +22,6 @@ $180K+ base
 ## Nice-to-Haves
 - Roles that use causal reasoning, knowledge graphs, or transcript/text extraction experience
 
-## Search Focus (updated 2026-11-04, per Georgia)
+## Search Focus (updated 2026-11-04, per Alex)
 - Build search queries around: evals, benchmarks, human data, structured extraction, applied research.
 - Do not use "post-training", "RL", "reinforcement learning" or "frontier lab" as search terms; they pull in RL-environment and reward-model roles.

@@ -102,7 +102,7 @@ def test_warm_intro_dedupes_with_existing_person(conn, tmp_path):
 
 
 def test_apply_sheet_needs_section():
-    text = ("# Apply\n\n## Answers\n- not this\n\n## NEEDS GEORGIA\n- Why us?\n* Upload transcript\n"
+    text = ("# Apply\n\n## Answers\n- not this\n\n## NEEDS ALEX\n- Why us?\n* Upload transcript\n"
             "plain line\n\n## Other\n- nor this\n")
     assert apply_sheet_needs(text) == ["- Why us?", "* Upload transcript"]
     assert apply_sheet_needs("nothing") == []
