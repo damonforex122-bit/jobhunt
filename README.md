@@ -1,139 +1,301 @@
 # jobhunt
 
-A local job-search tool: imports your Proficiently data, scans company ATS boards,
-grades fit against your resume, and finds likely hiring managers. FastAPI + SQLite,
-served only on `127.0.0.1:8000`.
+jobhunt is a job-search helper that runs on your own Mac. Nothing is hosted anywhere.
 
-## Setup
+- It watches the careers pages of companies you pick and collects new openings.
+- It reads your resume and grades how well each job fits.
+- It rewrites your resume for one job at a time, using only what is already in your resume.
+- It tracks every application, from applied to offer.
+- If you connect Gmail, it suggests status changes from recruiter emails.
+
+## Install on a Mac
+
+You do this once. It takes about 10 minutes.
+
+A **terminal** is a window where you type commands. Open it with Finder → Applications → Utilities → Terminal.
+Paste each command below into it and press Return.
+
+1. Install git, the tool that downloads the app. A window will pop up. Click Install and wait until it finishes.
+
+   ```
+   xcode-select --install
+   ```
+
+   If it says the tools are already installed, that is fine. Go on.
+
+2. Install uv. uv installs the right Python for you, so you do not need to install Python yourself.
+
+   ```
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+3. Close the Terminal window and open a new one. This lets it find uv.
+
+4. Accept the invite to the GitHub repository (it arrives by email). Then download the app. The first time, git may ask you to sign in to GitHub.
+
+   ```
+   git clone https://github.com/georgia-max/jobhunt.git
+   ```
+
+5. Go into the folder and install what the app needs.
+
+   ```
+   cd jobhunt && uv sync
+   ```
+
+6. Start the app. It opens in your browser.
+
+   ```
+   uv run jobhunt serve --open
+   ```
+
+The app only runs while that Terminal window is open. To stop it, press Control-C in the window.
+To start it again later, open a new Terminal window and run:
 
 ```
-uv sync
-cp .env.example .env     # then fill in the keys you have
+cd jobhunt && uv run jobhunt serve --open
 ```
 
-## Commands
+If you cloned somewhere other than your home folder, `cd` to that folder instead.
 
-Run all commands from the repo root (`data/` and `config/` paths are relative to it).
+### What it costs
+
+The app is free. The AI companies it talks to charge by use, and Gemini has a free tier. You pay each
+provider directly, and only for the keys you add. The app calls them only when you grade a job, tailor a
+resume, have your resume read, or run the morning step (see Advanced).
+It makes no AI calls in the background otherwise.
+
+## The setup wizard
+
+The first time you open the app, it shows a setup wizard. Every step has a Skip button, and **Skip setup**
+at the top skips them all. You can change anything later on the **Profile** page. You can also reopen
+the wizard at http://127.0.0.1:8000/setup.
+
+1. **AI key.** The app uses an AI model to read your resume, grade jobs and tailor resumes.
+   You need one key. Paste it, then press **Test** to check that it works.
+   - Gemini has a free tier. Get a key at https://aistudio.google.com/apikey. This is the best one to start with.
+   - Claude (Anthropic): https://console.anthropic.com/settings/keys
+   - OpenRouter: https://openrouter.ai/keys
+
+   You can add more than one. Gemini is tried first. If it is busy, the app moves to Claude, then OpenRouter.
+   Only providers with a key are used.
+
+2. **Resume.** Upload your resume as a PDF. The app reads it and shows you what it found, with each job and
+   its bullets. Check that every bullet sits under the right job. If it looks right, press **Use this resume**.
+   If not, press **Try another file**.
+   - No PDF handy? Open your LinkedIn profile, then choose More → Save to PDF.
+   - The app never invents anything. It only keeps text that is really in your PDF.
+
+3. **Links.** Your LinkedIn, GitHub and website. They go in the header of your tailored resumes.
+   They are filled in from your resume when it had them.
+
+4. **Preferences.** Target roles and locations (at least one of each), a salary floor, words to look for in
+   job titles, words to avoid, and notes for the AI (one per line, such as "never say I managed a team").
+   You can also choose the folder where tailored resumes are saved. The default is `~/Documents/jobhunt/Resumes`.
+
+5. **Companies.** Paste careers-page links, one per line. Greenhouse, Ashby and Lever pages work,
+   for example `https://jobs.lever.co/acme`. Links the app does not recognize are listed so you can fix them.
+
+6. **Gmail (optional).** The app reads your recruiting email, read-only, and suggests status changes.
+   - Turn on 2-Step Verification for your Google account first.
+   - Open https://myaccount.google.com/apppasswords.
+   - Name it "jobhunt" and create it. Google shows 16 characters.
+   - Paste your Gmail address and those 16 characters, then press **Test connection**.
+
+   The app password lets the app read your mail. You can delete it from the same Google page at any time.
+
+7. **People (optional).** Apollo and Exa keys let the app suggest people to contact at a company.
+   Skip this unless you already have those accounts.
+
+When it finishes, press **Scan my companies** to pull in the first jobs.
+
+## Your data
+
+Everything stays on your Mac.
+
+- **`data/jobhunt.db`** is your database (SQLite). The app creates it the first time you run it.
+  There is nothing to install.
+  It holds your jobs, grades, pipeline history, preferences, and Gmail suggestions.
+- **`data/`** also holds the copy of your uploaded resume (`data/master/`), and the morning-run log if you use it.
+- **`.env`** holds your keys and passwords. It is readable only by you.
+  Never share it or paste it into a message.
+- Tailored resumes go to the folder you chose (default `~/Documents/jobhunt/Resumes`), in a folder per company.
+
+**Back up** by copying the `data/` folder and the `.env` file somewhere safe.
+**Start over** by quitting the app and deleting `data/jobhunt.db`.
+
+**Privacy.** Your resume text and the job posting are sent to the AI provider whose key you added, when you
+grade, tailor, or have your resume read. If you connect Gmail, the app stores only the sender, subject,
+date and a short snippet, and only for emails that produced a suggestion. It never stores email bodies, and
+it cannot send, delete or change email. Nothing else leaves your Mac. The app only listens on your own computer
+(127.0.0.1), so nobody else on your network can open it.
+
+## Daily use
+
+Use the menu at the top of the page.
+
+- **Jobs.** Your list of openings. To add one, paste a link in **Add a job by link** and press
+  **Add and tailor**. Open a job to press **Grade** (a fit score from 1 to 10, with reasons) or
+  **Tailor resume**. Use the status dropdown to move it along, with an optional note.
+  A job's page keeps the history of its status changes.
+- **Review.** On a job with a tailored resume, press **Review & refine**. Chat to ask for changes
+  ("make the first bullet shorter") or press **Tailor now**. Every change is checked against your original
+  resume so nothing is invented.
+- **Pipeline.** A board of your applications. Drag a card to change its stage. The stages are
+  applied, screening, interviewing and offer, then accepted, rejected or withdrawn at the end.
+  With Gmail connected, press **Sync Gmail**. Suggested moves appear at the top with **Accept** and **Dismiss**.
+  Nothing changes until you accept.
+- **Interviews.** Interviews found in your email, in one place.
+- **Companies.** The careers pages you watch. Press **Scan now** to look for new jobs.
+- **Profile.** Change your resume, links, preferences, notes, output folder and keys at any time.
+
+### Commands
+
+You can do most things from the terminal too. Run these inside the `jobhunt` folder.
 
 ```
-uv run jobhunt import    # load jobs/companies/preferences from the Proficiently folder
-uv run jobhunt scan      # scan watchlist + known ATS boards (Greenhouse, Ashby, Lever)
-uv run jobhunt fit <id> | --all-new   # grade one job, or every 'new' job (keyword score always; Gemini score with a key)
-uv run jobhunt tailor <id>   # tailor the master resume PDF to a job (needs GEMINI_API_KEY)
-uv run jobhunt people <job_id>   # find likely hiring managers for a job
-uv run jobhunt status <id> applied --note "Referred by Sam"   # move a job to a pipeline stage
-uv run jobhunt pipeline [--all]   # jobs by stage (--all adds accepted/rejected/withdrawn)
-uv run jobhunt gmail-auth   # one-time: connect Gmail, read-only (see "Gmail setup")
-uv run jobhunt gmail-sync [--days 30]   # suggest pipeline moves from recent recruiting emails
-uv run jobhunt serve     # web UI at http://127.0.0.1:8000
+uv run jobhunt serve --open            # start the app (add --port 8002 to use another port)
+uv run jobhunt add <link>              # add a job from a link and tailor your resume to it
+uv run jobhunt scan                    # look for new jobs at your companies
+uv run jobhunt fit <id>                # grade one job (or: fit --all-new)
+uv run jobhunt tailor <id>             # tailor your resume to a job
+uv run jobhunt people <id>             # find likely hiring managers for a job
+uv run jobhunt status <id> applied     # move a job to a stage (add --note "text")
+uv run jobhunt pipeline                # jobs by stage (add --all to include closed ones)
+uv run jobhunt gmail-sync              # suggest status changes from recent emails
 ```
 
-### Daily morning run
+If a posting can't be read from its link, `add` tells you to save the text to a file and rerun it with
+`--text-file FILE`. Run `uv run jobhunt <command> -h` to see every option.
 
-`uv run jobhunt daily --install [--at HH:MM]` schedules the morning run with launchd. After installing, run it once with
-`launchctl kickstart -k gui/$(id -u)/com.jobhunt.daily` and check `uv run jobhunt daily --status`. If the import step
-says "permission denied", macOS is blocking background access to `~/Documents`: allow Full Disk Access for the
-`jobhunt` entry point, or move `PROFICIENTLY_DIR` somewhere else.
+## Updating
 
-### Application pipeline
-
-Stages: `applied` → `screening` → `interviewing` → `offer`, closed as `accepted`, `rejected` or `withdrawn`.
-Change a job's stage on its page (with an optional note) or with `jobhunt status`. Every change is
-logged with its date; the job page shows the history and the **Pipeline** page shows a board.
-Grading, import and scan never move a job that is already in the pipeline.
-
-### Tailored resumes
-
-`jobhunt tailor <id>` reads the job posting, matches it to your master resume
-(`~/Documents/Resume/Georgia Liu - Master Resume.pdf`, override with `MASTER_RESUME_PATH`), and renders a
-2-page PDF in the master's layout. Files go to `~/Documents/Resume/<Company>/` (override with
-`RESUME_OUTPUT_DIR`) as `Georgia Liu - Resume.pdf`. If that name is taken by a file you made, it is never
-overwritten: the new one is `Georgia Liu - Resume (<Job title>).pdf`. Re-running a job replaces only its own file.
-
-**Providers.** Tailoring tries Gemini first, then Claude (`ANTHROPIC_API_KEY`, model `CLAUDE_MODEL`, default
-`claude-opus-5-5`), then OpenRouter (`OPENROUTER_API_KEY`, model `OPENROUTER_MODEL`, default `openai/gpt-5-mini`).
-Only providers with a key are used. A timeout (90s; 180s for Claude) or an overloaded/rate-limited reply is
-retried once, then the next provider takes over and is kept for the rest of the run. The command prints each
-step and any switch, e.g. "Gemini is unavailable — trying Claude…".
-
-**No invention.** The model may only select and reword what is in your master. Every rewritten bullet is
-checked for new numbers and new capitalised terms, then by a second model pass; anything that fails keeps
-your original wording. The command lists the requirements your master doesn't support (**Gaps**) and the
-bullets where it **kept your original wording**. If anything goes wrong, no file is written.
-Tailoring never changes the job's status.
-
-To start clean, delete `data/jobhunt.db`, then run `uv run jobhunt import && uv run jobhunt scan`.
-
-Run `uv run jobhunt <command> -h` for options. Tests: `uv run pytest -q` (no network).
-
-## Where data comes from
-
-- **Proficiently export** (`PROFICIENTLY_DIR`, default `~/Documents/Resume/.proficiently`):
-  resume, preferences and previously found jobs.
-- **ATS boards**: companies in `config/watchlist.yaml` plus those learned from the import.
-- **Your database**: `data/jobhunt.db` (git-ignored).
-
-Locations (San Francisco, New York), the $180k base floor and the search terms come from
-your preferences. Jobs below the floor are dropped; unclear location/salary is kept and
-flagged.
-
-## Read-only guarantee
-
-Nothing in this app writes to, moves or deletes anything under `PROFICIENTLY_DIR`. It is
-only read. All state lives in `data/jobhunt.db`.
-
-## API keys (all optional)
-
-A missing key turns that feature off with a banner in the UI; nothing crashes.
-
-| Variable | Turns on |
-| --- | --- |
-| `GEMINI_API_KEY` (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`) | LLM fit score (1-10), match %, rewritten bullets. Without it you still get the keyword score. |
-| `APOLLO_API_KEY` | Apollo people search for hiring-manager candidates (names may be partly obfuscated, shown as-is). |
-| `EXA_API_KEY` | Exa web search for hiring-manager candidates. |
-
-People are only stored with a source and source URL. Hiring-manager names found in the
-posting itself need no key.
-
-### Apollo needs a company domain
-
-Apollo searches by company domain, so set `domain` on the company in
-`config/watchlist.yaml` (same company `name` as in your jobs), e.g.:
-
-```yaml
-- {name: Harvey, ats: ashby, slug: harvey, domain: harvey.ai}
+```
+cd jobhunt && git pull && uv sync
 ```
 
-Without a domain the people panel shows "Skipped apollo: <reason>".
+Then start the app again. Your data stays as it is.
 
-## Gmail setup (interview tracking)
+## Troubleshooting
 
-`gmail-sync` reads recent recruiting emails (read-only) and suggests pipeline moves such as
-*applied → screening* when a recruiter asks for a phone screen. Suggestions appear at the top of the
-**Pipeline** page with Accept / Dismiss buttons. **Nothing changes until you accept.** An accepted move
-is logged in the job's history with the email subject and date.
+**"Port 8000 is busy."** Another copy of the app, or another program, is using it. Close the other Terminal
+window, or use a different port:
 
-How it decides:
-- **Stage:** fixed phrases. "phone screen" or "recruiter call" → screening; "onsite", "final round" or
-  "technical interview" → interviewing; "extend an offer" → offer; "unfortunately… not moving forward"
-  → rejected; "thank you for applying" → applied.
-- **Job:** the company name must appear in the sender or the subject, or be the sender's domain.
-  If the email names the job title, that job is used. Otherwise it picks the company's job that is furthest along.
-- **Which moves:** only moves forward, or moves that close an open job. Each email is checked once.
+```
+uv run jobhunt serve --port 8002 --open
+```
 
-Only the sender, subject, date and a 300-character snippet are stored, and only for emails that
-produced a suggestion. Email bodies are never stored.
+**Gemini is busy or slow.** The app tries once more, then moves to your next provider (Claude, then
+OpenRouter) and uses it for the rest of that task. It tells you when it switches. To have a backup,
+add a second key on the Profile page. Without a backup, wait a minute and try again.
 
-One-time setup (about 10 minutes):
+**Gmail says the app password was rejected.** Check that 2-Step Verification is on. Make a new app password
+at https://myaccount.google.com/apppasswords and paste it again. Spaces are fine. Use the same Gmail address
+you made it for. Some work or school Google accounts do not allow app passwords.
+
+**"Couldn't read your resume reliably."** The app checks everything the AI read against the words in your PDF.
+If it can't prove the read is faithful, it refuses to use it, so it never works from guesses.
+Export your resume as a PDF again from Google Docs or Word, or use LinkedIn → More → Save to PDF. Then upload that file.
+Scanned or image-only PDFs have no text to read. Export a text PDF instead.
+If the message says to add an AI key, add one on the Setup or Profile page first.
+
+**Gmail suggestions are empty.** Suggestions only come from recruiting emails in the last 30 days that
+name a company you track, and only for moves forward. Check that Gmail is connected (Setup → Gmail, press **Test
+connection**), then press **Sync Gmail** on the Pipeline page. Newsletters and your own replies are skipped.
+
+**The page says "Gemini grading off".** Add a Gemini key on the Profile page. You can ignore this if you
+use another provider.
+
+## Advanced
+
+Nothing here is needed to use the app.
+
+### The morning run
+
+One command imports, scans your companies, syncs Gmail and interviews, and grades new jobs (grading needs a Gemini key):
+
+```
+uv run jobhunt daily
+```
+
+To run it every morning at 08:00 on your Mac (pick another time with `--at HH:MM`, 24-hour):
+
+```
+uv run jobhunt daily --install
+```
+
+Run it once now, then check it:
+
+```
+launchctl kickstart -k gui/$(id -u)/com.jobhunt.daily
+uv run jobhunt daily --status
+```
+
+`uv run jobhunt daily --uninstall` removes the schedule. The log is `data/daily.log`.
+This is the one place the app calls the AI without you pressing a button, so it uses your key every morning.
+If a step says "permission denied", macOS is blocking background access to `~/Documents`. Allow Full Disk Access for
+the `jobhunt` command, or move the folder it reads to somewhere else.
+
+### Google OAuth for Gmail
+
+The app password in the wizard is the easy way. If you already use a Google Cloud project, you can use
+read-only Google sign-in instead. The app uses the app password if both are set up.
+
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API**.
-2. Under **OAuth consent screen**, choose *External*. Add your Gmail address as a **test user**.
-3. Under **Credentials** → *Create credentials* → *OAuth client ID* → **Desktop app**. Download the
-   JSON and save it as `data/gmail_client_secret.json`. `data/` is git-ignored.
-4. Run `uv run jobhunt gmail-auth` and approve read-only access in the browser. The token is saved to
-   `data/gmail_token.json`, readable only by you.
-5. Run `uv run jobhunt gmail-sync`, or click **Sync Gmail** on the Pipeline page.
+2. Under **OAuth consent screen**, choose *External* and add your Gmail address as a **test user**.
+3. Under **Credentials**, choose *Create credentials* → *OAuth client ID* → **Desktop app**.
+   Download the JSON and save it as `data/gmail_client_secret.json`.
+4. Run `uv run jobhunt gmail-auth` and approve read-only access in the browser.
+   The token is saved to `data/gmail_token.json`.
 
-While the Google app stays in *Testing* mode, Google expires the sign-in after 7 days. When sync
-says the token expired, run `gmail-auth` again.
-To use other file locations, set `GMAIL_CLIENT_SECRET` and `GMAIL_TOKEN`.
+While the Google app is in *Testing* mode, Google expires the sign-in after 7 days. When sync says the token expired,
+run `gmail-auth` again. Use `GMAIL_CLIENT_SECRET` and `GMAIL_TOKEN` to keep the files elsewhere.
 
+### Proficiently
+
+If you use Proficiently, jobhunt can read its export folder. It never writes to, moves or deletes anything there.
+
+Set `PROFICIENTLY_DIR` in `.env` to the export folder (usually `~/Documents/Resume/.proficiently`). Then either press
+**Import from Proficiently** in the wizard's Companies step, or run:
+
+```
+uv run jobhunt import
+```
+
+This loads your earlier jobs and companies, plus your preferences. Jobs below your salary floor are dropped. Unclear
+location or salary is kept and flagged. Jobs and files Proficiently prepared show on each job's page.
+
+### Moving over from the original install
+
+`uv run jobhunt migrate-profile` carries an older single-user install's resume path, output folder, preferences
+and notes into the new settings. It is safe to run again, and it never writes inside the old folders.
+New users do not need it.
+
+### Settings
+
+Everything can be set in `.env`. The wizard and Profile page write the keys for you. Copy `.env.example`
+to `.env` to edit them by hand. Empty values count as unset.
+
+| Variable | What it does | Default |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Gemini key. Used first. | none |
+| `GEMINI_MODEL` | Gemini model name. | `gemini-3.5-flash-lite` |
+| `ANTHROPIC_API_KEY` | Claude key. Backup provider. | none |
+| `CLAUDE_MODEL` | Claude model name. | `claude-opus-5-5` |
+| `OPENROUTER_API_KEY` | OpenRouter key. Second backup. | none |
+| `OPENROUTER_MODEL` | OpenRouter model name. | `openai/gpt-5-mini` |
+| `APOLLO_API_KEY` | Apollo people search. It needs a `domain` for the company in `config/watchlist.yaml`. | none |
+| `EXA_API_KEY` | Exa web search for hiring-manager candidates. | none |
+| `GMAIL_ADDRESS` | Gmail address for the app password. | none |
+| `GMAIL_APP_PASSWORD` | Gmail app password (read-only access). | none |
+| `GMAIL_CLIENT_SECRET` | Google OAuth client file (Advanced). | `data/gmail_client_secret.json` |
+| `GMAIL_TOKEN` | Google OAuth token file (Advanced). | `data/gmail_token.json` |
+| `MASTER_RESUME_PATH` | Use this resume PDF instead of the uploaded one. | none |
+| `RESUME_OUTPUT_DIR` | Where tailored resumes are saved. | `~/Documents/jobhunt/Resumes` |
+| `DB_PATH` | The database file. | `data/jobhunt.db` |
+| `WATCHLIST_PATH` | Extra companies to scan, as YAML. | `config/watchlist.yaml` |
+| `PROFICIENTLY_DIR` | Proficiently export folder (read-only). | none |
+
+Anything you set in the terminal's environment overrides `.env`.
+
+To check the code, run `uv run pytest -q`. The tests use no network.
