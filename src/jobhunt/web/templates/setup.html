@@ -19,7 +19,7 @@
 
 {% if step == "ai" %}
 <h2 class="card-title">1. An AI key</h2>
-<p>The app uses an AI model to read your resume, grade jobs and tailor resumes. One key is enough. Gemini has a free tier.</p>
+<p>The app uses an AI model to read your resume, grade jobs and tailor resumes. A free Gemini key is recommended: it is the only one that turns on Grade. Claude and OpenRouter work as backups for reading your resume, tailoring and the review chat. With only Claude or OpenRouter you get keyword scores instead of AI grades.</p>
 <form method="post" action="/setup/ai" autocomplete="off" class="space-y-3">
 {% for f in ai_keys %}
 <label class="form-control"><span class="label-text">{{ ai_labels[f] }} {% if keys[f] %}<code>{{ keys[f] }}</code>{% else %}<span class="opacity-70">not set</span>{% endif %}

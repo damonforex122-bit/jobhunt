@@ -31,16 +31,26 @@ Paste each command below into it and press Return.
 
 3. Close the Terminal window and open a new one. This lets it find uv.
 
-4. Accept the invite to the GitHub repository (it arrives by email). Then download the app. The first time, git may ask you to sign in to GitHub.
+4. Download the app. The repository is private, so GitHub has to know who you are.
+   You need to accept Georgia's invite to the repo first (check your email from GitHub).
+   - Install GitHub's command-line tool: go to https://cli.github.com, download the macOS installer and open it.
+   - Sign in. Choose GitHub.com, HTTPS, and "Login with a web browser", then follow the code shown:
+
+     ```
+     gh auth login
+     ```
+
+   - Download the app and go into its folder:
+
+     ```
+     gh repo clone georgia-max/jobhunt
+     cd jobhunt
+     ```
+
+5. Install what the app needs.
 
    ```
-   git clone https://github.com/georgia-max/jobhunt.git
-   ```
-
-5. Go into the folder and install what the app needs.
-
-   ```
-   cd jobhunt && uv sync
+   uv sync
    ```
 
 6. Start the app. It opens in your browser.
@@ -61,24 +71,26 @@ If you cloned somewhere other than your home folder, `cd` to that folder instead
 ### What it costs
 
 The app is free. The AI companies it talks to charge by use, and Gemini has a free tier. You pay each
-provider directly, and only for the keys you add. The app calls them only when you grade a job, tailor a
-resume, have your resume read, or run the morning step (see Advanced).
+provider directly, and only for the keys you add. The app calls them only when you grade a job (Gemini only),
+tailor a resume, have your resume read, chat in Review, or run the morning step (see Advanced).
 It makes no AI calls in the background otherwise.
 
 ## The setup wizard
 
 The first time you open the app, it shows a setup wizard. Every step has a Skip button, and **Skip setup**
 at the top skips them all. You can change anything later on the **Profile** page. You can also reopen
-the wizard at http://127.0.0.1:8000/setup.
+the wizard at http://127.0.0.1:8000/setup (or your port), or Profile → Run setup again.
 
 1. **AI key.** The app uses an AI model to read your resume, grade jobs and tailor resumes.
-   You need one key. Paste it, then press **Test** to check that it works.
-   - Gemini has a free tier. Get a key at https://aistudio.google.com/apikey. This is the best one to start with.
+   You need at least one key. Paste it, then press **Test** to check that it works.
+   A free Gemini key is recommended, because it is the only one that turns on **Grade**.
+   With only a Claude or OpenRouter key you get keyword scores instead of AI grades.
+   - Gemini has a free tier. Get a key at https://aistudio.google.com/apikey.
    - Claude (Anthropic): https://console.anthropic.com/settings/keys
    - OpenRouter: https://openrouter.ai/keys
 
-   You can add more than one. Gemini is tried first. If it is busy, the app moves to Claude, then OpenRouter.
-   Only providers with a key are used.
+   Claude and OpenRouter work as backups for reading your resume, tailoring and the Review chat.
+   Gemini is tried first. If it is busy, the app moves to Claude, then OpenRouter. Only providers with a key are used.
 
 2. **Resume.** Upload your resume as a PDF. The app reads it and shows you what it found, with each job and
    its bullets. Check that every bullet sits under the right job. If it looks right, press **Use this resume**.
@@ -122,7 +134,9 @@ Everything stays on your Mac.
 - Tailored resumes go to the folder you chose (default `~/Documents/jobhunt/Resumes`), in a folder per company.
 
 **Back up** by copying the `data/` folder and the `.env` file somewhere safe.
-**Start over** by quitting the app and deleting `data/jobhunt.db`.
+**Restore** by copying your backed-up `data/` folder and `.env` file back into the jobhunt folder.
+**Start over** by quitting the app and deleting `data/jobhunt.db`. Your keys in `.env` and your uploaded resume
+in `data/master/` stay. To wipe everything, delete the whole `data/` folder and `.env`.
 
 **Privacy.** Your resume text and the job posting are sent to the AI provider whose key you added, when you
 grade, tailor, or have your resume read. If you connect Gmail, the app stores only the sender, subject,
@@ -200,11 +214,10 @@ Scanned or image-only PDFs have no text to read. Export a text PDF instead.
 If the message says to add an AI key, add one on the Setup or Profile page first.
 
 **Gmail suggestions are empty.** Suggestions only come from recruiting emails in the last 30 days that
-name a company you track, and only for moves forward. Check that Gmail is connected (Setup → Gmail, press **Test
+name a company you track, and only moves a job forward, or closes it (for example a rejection). Check that Gmail is connected (Setup → Gmail, press **Test
 connection**), then press **Sync Gmail** on the Pipeline page. Newsletters and your own replies are skipped.
 
-**The page says "Gemini grading off".** Add a Gemini key on the Profile page. You can ignore this if you
-use another provider.
+**The page says "Gemini grading off".** Add a Gemini key on the Profile page to turn on grading.
 
 ## Advanced
 
