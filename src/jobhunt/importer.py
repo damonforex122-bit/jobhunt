@@ -2,16 +2,17 @@
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
-from .db import get_fit, save_fit, upsert_company, upsert_job, upsert_person
-from .models import Company, Fit, Job, Person
-from .urls import ats_from_url, normalize_url
+from .db import finish_run, set_job_status, start_run, upsert_company, upsert_job, upsert_person
+from .models import Company, Job, Person
+from .urls import ats_from_url, normalize_url, slugify
 
-IMPORT_MODEL = "proficiently-import"
+TRIAGE = {"ready", "needs", "low"}
+FORWARD = {"applied", "screening", "interviewing", "offer"}
+OPEN_STATUSES = ("new", "ready", "needs", "low")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-REQUIRED_COLUMNS = {"company", "role", "score", "job url"}
+REQUIRED_COLUMNS = {"company", "job url"}
 PERSON_RE = re.compile(r"^\s*-\s+\*\*(?P<name>[^*]+)\*\*\s*,?\s*(?P<rest>.*?):\s*(?P<url>https?://\S+)\s*$")
 
 
@@ -24,6 +25,17 @@ class ImportedJob:
     job: Job
     score: int | None
     reason: str | None
+    status_cell: str = ""
+    date: str = ""
+
+
+def map_status(cell: str) -> tuple[str, str] | None:
+    s = (cell or "").strip().lower()
+    if s in TRIAGE:
+        return ("triage", s)
+    if s in FORWARD:
+        return ("forward", s)
+    return None
 
 
 def _split_row(line: str) -> list[str]:
@@ -59,27 +71,36 @@ def parse_job_history(text: str) -> list[ImportedJob]:
         reason = None
         ri = columns.get("reason")
         if ri is not None and ri < len(cells):
-            reason = "|".join(cells[ri:]).replace("\\|", "|").strip() or None
+            extra = max(0, len(cells) - len(columns))  # cells split off by unescaped pipes inside the reason
+            reason = "|".join(cells[ri : ri + 1 + extra]).replace("\\|", "|").strip() or None
         job = Job(
             company=company,
             title=title,
             url=url,
-            source="import",
-            status=cell("status") or "new",
+            source="proficiently",
+            status="new",  # Proficiently's status is applied by run_import, never via upsert_job
             first_seen=cell("date") or None,
         )
-        results.append(ImportedJob(job=job, score=score, reason=reason))
+        results.append(ImportedJob(job=job, score=score, reason=reason,
+                                   status_cell=cell("status"), date=cell("date")))
     return results
 
 
-def parse_job_dir(path: Path) -> tuple[str | None, list[Person]]:
+def _read_inside(file: Path, root: Path) -> str | None:
+    """File text, or None when missing or resolving outside `root` (e.g. a symlink)."""
+    if not file.is_file() or not file.resolve().is_relative_to(root.resolve()):
+        return None
+    return file.read_text(errors="replace")
+
+
+def parse_job_dir(path: Path, root: Path | None = None) -> tuple[str | None, list[Person]]:
     path = Path(path)
-    posting_file = path / "posting.md"
-    posting = posting_file.read_text() if posting_file.is_file() else None
+    root = Path(root) if root is not None else path
+    posting = _read_inside(path / "posting.md", root)
     people: list[Person] = []
-    people_file = path / "people.md"
-    if people_file.is_file():
-        for line in people_file.read_text().splitlines():
+    people_text = _read_inside(path / "people.md", root)
+    if people_text is not None:
+        for line in people_text.splitlines():
             m = PERSON_RE.match(line)
             if not m:
                 continue
@@ -97,10 +118,6 @@ def parse_job_dir(path: Path) -> tuple[str | None, list[Person]]:
     return posting, people
 
 
-def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-
-
 def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
     prefix = f"{slugify(job.company)}-{slugify(job.title)}-"
     matches = [
@@ -110,62 +127,101 @@ def _find_job_dir(dirs: list[Path], job: Job) -> Path | None:
     return max(matches, key=lambda d: d.name) if matches else None  # latest date wins
 
 
-def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict[str, int]:
+def run_import(conn: sqlite3.Connection, proficiently_dir: Path) -> dict:
     root = Path(proficiently_dir)
-    history = root / "job-history.md"
-    if not root.is_dir():
-        raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
-    if not history.is_file():
-        raise ImportSourceError(f"job-history.md not found in {root}")
-    imported = parse_job_history(history.read_text())
-    jobs_root = root / "jobs"
-    dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
-
-    counts = {"jobs": 0, "new": 0, "companies": 0, "people": 0}
+    counts = {"jobs": 0, "new": 0, "updated": 0, "moved": 0, "unknown_status": 0,
+              "companies": 0, "people": 0}
     companies: set[str] = set()
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    run_id = start_run(conn, "import", str(root))
+    try:
+        history = root / "job-history.md"
+        denied = (f"Can't read {root}: permission denied (macOS may block background access to "
+                  "~/Documents — see README)")
+        try:
+            if not root.is_dir():
+                raise ImportSourceError(f"Proficiently directory not found: {root} (set PROFICIENTLY_DIR)")
+            if not history.is_file():
+                raise ImportSourceError(f"job-history.md not found in {root}")
+            rows = parse_job_history(history.read_text())
+            extra = root / "_history-add.md"
+            if extra.is_file():
+                rows += parse_job_history(extra.read_text())
+        except PermissionError as e:
+            raise ImportSourceError(denied) from e
+        by_url: dict[str, ImportedJob] = {}
+        for item in rows:  # document order: a later row for the same URL wins
+            by_url[normalize_url(item.job.url)] = item
+        jobs_root = root / "jobs"
+        try:
+            dirs = sorted(d for d in jobs_root.iterdir() if d.is_dir()) if jobs_root.is_dir() else []
+        except PermissionError as e:
+            raise ImportSourceError(denied) from e
 
-    for item in imported:
-        job = item.job
-        ats = ats_from_url(job.url)
-        upsert_company(
-            conn,
-            Company(name=job.company, ats=ats[0] if ats else None, slug=ats[1] if ats else None),
-        )
-        companies.add(job.company)
-
-        job_dir = _find_job_dir(dirs, job)
-        people: list[Person] = []
-        if job_dir is not None:
-            posting, people = parse_job_dir(job_dir)
-            if posting:
-                row = conn.execute(
-                    "SELECT description FROM jobs WHERE url = ?", (normalize_url(job.url),)
-                ).fetchone()
-                if row is None or not (row["description"] or "").strip():
-                    job = job.model_copy(update={"description": posting})
-
-        job_id, is_new = upsert_job(conn, job)
-        counts["jobs"] += 1
-        counts["new"] += int(is_new)
-        existing_fit = get_fit(conn, job_id)
-        if existing_fit is None or existing_fit.model == IMPORT_MODEL:  # never clobber a real grade
-            save_fit(
+        for url, item in by_url.items():
+            job = item.job
+            ats = ats_from_url(job.url)
+            upsert_company(
                 conn,
-                Fit(
-                    job_id=job_id,
-                    keyword_score=0,
-                    llm_score=item.score,
-                    reasons=item.reason,
-                    model=IMPORT_MODEL,
-                    graded_at=now,
-                ),
+                Company(name=job.company, ats=ats[0] if ats else None, slug=ats[1] if ats else None),
             )
-        for person in people:
-            upsert_person(conn, person.model_copy(update={"company": job.company, "job_id": job_id}))
-            counts["people"] += 1
+            companies.add(job.company)
 
-    counts["companies"] = len(companies)
+            job_dir = _find_job_dir(dirs, job)
+            people: list[Person] = []
+            posting = None
+            if job_dir is not None:
+                posting, people = parse_job_dir(job_dir, root)
+            existing = conn.execute("SELECT id, description FROM jobs WHERE url = ?", (url,)).fetchone()
+            if existing is None:
+                if posting:
+                    job = job.model_copy(update={"description": posting})
+                job_id, is_new = upsert_job(conn, job)
+            else:  # a re-import never rewrites title/company/etc; it only fills an empty description
+                job_id, is_new = existing["id"], False
+                if posting and not (existing["description"] or "").strip():
+                    conn.execute("UPDATE jobs SET description = ? WHERE id = ?", (posting, job_id))
+                    conn.commit()
+            counts["jobs"] += 1
+            counts["new"] += int(is_new)
+            cur = conn.execute("SELECT status, prof_score, prof_reason FROM jobs WHERE id = ?",
+                               (job_id,)).fetchone()
+            changed = False
+            if (cur["prof_score"], cur["prof_reason"]) != (item.score, item.reason):
+                conn.execute("UPDATE jobs SET prof_score = ?, prof_reason = ? WHERE id = ?",
+                             (item.score, item.reason, job_id))
+                conn.commit()
+                changed = True
+
+            mapped = map_status(item.status_cell)
+            if mapped is None:
+                if item.status_cell.strip():
+                    counts["unknown_status"] += 1
+            else:
+                kind, target = mapped
+                if kind == "triage" and cur["status"] == "new":
+                    set_job_status(conn, job_id, target, source="proficiently")
+                    counts["moved"] += 1
+                elif kind == "forward" and cur["status"] in OPEN_STATUSES:
+                    set_job_status(conn, job_id, target, f"From Proficiently ({item.date})" if item.date else "From Proficiently",
+                                   source="proficiently")
+                    counts["moved"] += 1
+            if changed and not is_new:
+                counts["updated"] += 1
+            for person in people:
+                upsert_person(conn, person.model_copy(update={"company": job.company, "job_id": job_id}))
+                counts["people"] += 1
+        counts["companies"] = len(companies)
+        from .sources.proficiently_files import import_careers, import_digests, import_materials
+
+        counts["materials"] = import_materials(conn, root)
+        counts["careers"] = import_careers(conn, root)
+        digest_stats: dict = {}
+        counts["digests"] = import_digests(conn, root, digest_stats)
+        counts["digests_skipped"] = digest_stats.get("skipped", 0)
+    except Exception as e:
+        finish_run(conn, run_id, counts, error=str(e))
+        raise
+    finish_run(conn, run_id, counts)
     return counts
 
 
@@ -189,6 +245,9 @@ def register(sub) -> None:
             print(run_import(conn, directory))
         except (ImportSourceError, OSError) as e:
             print(f"error: {short_error(e)}")
+            return 1
+        except Exception as e:
+            print(f"error: import failed: {short_error(e)}")
             return 1
         finally:
             conn.close()

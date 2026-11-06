@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .models import CLOSED, PIPELINE, Company, Fit, Job, Person
@@ -100,12 +100,40 @@ CREATE TABLE IF NOT EXISTS interviews (
 CREATE TABLE IF NOT EXISTS interview_seen (
     gmail_id TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,  -- import | scan | gmail | interviews | grade | digest
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    counts_json TEXT,
+    error TEXT,
+    path TEXT
+);
+CREATE TABLE IF NOT EXISTS job_materials (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER REFERENCES jobs(id),
+    folder TEXT,
+    kind TEXT,  -- resume_pdf | resume_md | resume_docx | cover_letter | apply_sheet | warm_intros | posting
+    path TEXT UNIQUE,
+    mtime TEXT
+);
 """
 
 _JOB_UPDATE_FIELDS = (
     "company", "title", "location", "salary_min", "salary_max",
-    "description", "source", "posted_at",
+    "description", "posted_at",
 )
+
+
+def _local_date(iso: str | None, tz=None) -> date | None:
+    """The local calendar date of a stored timestamp (naive means UTC); None when unparseable."""
+    try:
+        dt = datetime.fromisoformat(iso or "")
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).date()
 
 
 def _now() -> str:
@@ -131,6 +159,11 @@ _ADDED_COLUMNS = [
     ("resumes", "matches_json", "TEXT"),
     ("resumes", "draft_json", "TEXT"),
     ("resumes", "final_at", "TEXT"),
+    ("jobs", "prof_score", "INTEGER"),
+    ("jobs", "prof_reason", "TEXT"),
+    ("jobs", "added_at", "TEXT"),
+    ("job_events", "source", "TEXT"),
+    ("people", "kind", "TEXT"),  # NULL = a found contact
 ]
 
 
@@ -139,6 +172,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    # Proficiently scores live on the job now, not as a fake fit. A surviving fit is newer than the
+    # column (the importer writes one per run), so it wins. Each step is guarded so an already
+    # migrated database runs no write at all.
+    if conn.execute("SELECT 1 FROM fits WHERE model = 'proficiently-import' LIMIT 1").fetchone():
+        conn.execute(
+            """UPDATE jobs SET
+                 prof_score = COALESCE((SELECT f.llm_score FROM fits f
+                                WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'), prof_score),
+                 prof_reason = COALESCE((SELECT f.reasons FROM fits f
+                                WHERE f.job_id = jobs.id AND f.model = 'proficiently-import'), prof_reason)
+               WHERE id IN (SELECT job_id FROM fits WHERE model = 'proficiently-import')""")
+        conn.execute("DELETE FROM fits WHERE model = 'proficiently-import'")
+    if conn.execute("SELECT 1 FROM jobs WHERE source = 'import' LIMIT 1").fetchone():
+        conn.execute("UPDATE jobs SET source = 'proficiently' WHERE source = 'import'")
+    if conn.execute("SELECT 1 FROM jobs WHERE added_at IS NULL AND first_seen IS NOT NULL LIMIT 1").fetchone():
+        conn.execute("UPDATE jobs SET added_at = first_seen WHERE added_at IS NULL AND first_seen IS NOT NULL")
     conn.commit()
 
 
@@ -192,19 +241,20 @@ def upsert_job(conn: sqlite3.Connection, j: Job) -> tuple[int, bool]:
     url = normalize_url(j.url)
     existing = conn.execute("SELECT * FROM jobs WHERE url = ?", (url,)).fetchone()
     if existing is None:
+        now = _now()
         cur = conn.execute(
             """INSERT INTO jobs (company, title, url, location, salary_min, salary_max,
-                   description, source, posted_at, first_seen, status, flags)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   description, source, posted_at, first_seen, status, flags, added_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (j.company, j.title, url, j.location, j.salary_min, j.salary_max,
-             j.description, j.source, j.posted_at, j.first_seen or _now(),
-             j.status, json.dumps(j.flags)),
+             j.description, j.source, j.posted_at, j.first_seen or now,
+             j.status, json.dumps(j.flags), now),
         )
         conn.commit()
         return cur.lastrowid, True
 
     updates = {f: getattr(j, f) for f in _JOB_UPDATE_FIELDS if getattr(j, f) is not None}
-    if j.flags or j.source != "import":  # a scan re-evaluates flags, so [] must clear stale ones
+    if j.flags or j.source != "proficiently":  # a scan re-evaluates flags, so [] must clear stale ones
         updates["flags"] = json.dumps(j.flags)
     if existing["status"] == "new":
         updates["status"] = j.status
@@ -218,31 +268,47 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return _job_row(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
 
 
+SCAN_SOURCES = ("greenhouse", "ashby", "lever")  # what sources/ats.py stores for scanned jobs
+
+
 def list_jobs(
     conn: sqlite3.Connection,
     *,
     status: str | None = None,
     min_score: int | None = None,
     company: str | None = None,
+    source: str | None = None,
+    added_on: date | None = None,
+    tz=None,
 ) -> list[dict]:
     where, args = [], []
+    if source == "scan":
+        where.append(f"j.source IN ({','.join('?' * len(SCAN_SOURCES))})")
+        args.extend(SCAN_SOURCES)
+    elif source is not None:
+        where.append("j.source = ?")
+        args.append(source)
     if status is not None:
         where.append("j.status = ?")
         args.append(status)
     if min_score is not None:
-        where.append("f.llm_score >= ?")
+        where.append("COALESCE(f.llm_score, j.prof_score) >= ?")
         args.append(min_score)
     if company is not None:
         where.append("j.company = ?")
         args.append(company)
     sql = (
-        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error, f.model AS fit_model "
+        "SELECT j.*, f.keyword_score, f.llm_score, f.match_pct, f.error AS fit_error, f.model AS fit_model, "
+        "j.prof_score, j.prof_reason "
         "FROM jobs j LEFT JOIN fits f ON f.job_id = j.id"
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY f.llm_score DESC, j.id DESC"
-    return [_job_row(r) for r in conn.execute(sql, args).fetchall()]
+    sql += " ORDER BY COALESCE(f.llm_score, j.prof_score) DESC, j.id DESC"
+    rows = [_job_row(r) for r in conn.execute(sql, args).fetchall()]
+    if added_on is not None:
+        rows = [r for r in rows if _local_date(r.get("added_at"), tz) == added_on]
+    return rows
 
 
 # --- fits ------------------------------------------------------------------
@@ -272,19 +338,24 @@ def get_fit(conn: sqlite3.Connection, job_id: int) -> Fit | None:
 # --- people ----------------------------------------------------------------
 
 def upsert_person(conn: sqlite3.Connection, p: Person) -> int:
+    """Insert or update a contact. A found contact (kind NULL) never downgrades a warm intro."""
     conn.execute(
         """INSERT INTO people (company, job_id, name, title, source, source_url,
-               linkedin_url, confidence)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               linkedin_url, confidence, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(company, name) DO UPDATE SET
              job_id = COALESCE(excluded.job_id, job_id),
              title = COALESCE(excluded.title, title),
-             source = excluded.source,
-             source_url = excluded.source_url,
+             source = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                           THEN source ELSE excluded.source END,
+             source_url = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                               THEN source_url ELSE excluded.source_url END,
              linkedin_url = COALESCE(excluded.linkedin_url, linkedin_url),
-             confidence = excluded.confidence""",
+             confidence = CASE WHEN excluded.kind IS NULL AND kind IS NOT NULL
+                               THEN confidence ELSE excluded.confidence END,
+             kind = COALESCE(excluded.kind, kind)""",
         (p.company, p.job_id, p.name, p.title, p.source, p.source_url,
-         p.linkedin_url, p.confidence),
+         p.linkedin_url, p.confidence, p.kind),
     )
     conn.commit()
     return conn.execute(
@@ -300,15 +371,15 @@ def list_people(conn: sqlite3.Connection, company: str) -> list[Person]:
 
 
 def set_job_status(conn: sqlite3.Connection, job_id: int, status: str,
-                   note: str | None = None) -> None:
+                   note: str | None = None, *, source: str | None = None) -> None:
     """Set a job's status and log the change. Re-saving the same status logs only a note."""
     note = (note or "").strip() or None
     row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         return
     if row["status"] != status or note:
-        conn.execute("INSERT INTO job_events (job_id, status, note, at) VALUES (?, ?, ?, ?)",
-                     (job_id, status, note, _now()))
+        conn.execute("INSERT INTO job_events (job_id, status, note, at, source) VALUES (?, ?, ?, ?, ?)",
+                     (job_id, status, note, _now(), source))
     conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
     conn.commit()
 
@@ -468,7 +539,7 @@ def resolve_gmail_suggestion(conn: sqlite3.Connection, suggestion_id: int, *, ac
     conn.commit()
     if accept:
         set_job_status(conn, job_id, row["suggested_status"],
-                       note=f"From Gmail: {row['subject']} ({row['received']})")
+                       note=f"From Gmail: {row['subject']} ({row['received']})", source="gmail")
     return True
 
 
@@ -539,3 +610,110 @@ def set_final(conn: sqlite3.Connection, job_id: int) -> None:
 
 def final_job_ids(conn: sqlite3.Connection) -> set[int]:
     return {r[0] for r in conn.execute("SELECT job_id FROM resumes WHERE final_at IS NOT NULL")}
+
+
+# --- runs ------------------------------------------------------------------
+
+def start_run(conn: sqlite3.Connection, kind: str, path: str | None = None) -> int:
+    cur = conn.execute("INSERT INTO runs (kind, started_at, path) VALUES (?, ?, ?)",
+                       (kind, _now(), path))
+    conn.commit()
+    return cur.lastrowid
+
+
+def finish_run(conn: sqlite3.Connection, run_id: int, counts: dict | None = None,
+               error: str | None = None) -> None:
+    conn.execute("UPDATE runs SET finished_at = ?, counts_json = ?, error = ? WHERE id = ?",
+                 (_now(), json.dumps(counts) if counts is not None else None, error, run_id))
+    conn.commit()
+
+
+def _run_row(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["counts"] = json.loads(d["counts_json"]) if d.get("counts_json") else None
+    return d
+
+
+def last_runs(conn: sqlite3.Connection) -> dict[str, dict]:
+    """The latest run of each kind."""
+    rows = conn.execute(
+        "SELECT * FROM runs WHERE id IN (SELECT MAX(id) FROM runs GROUP BY kind)").fetchall()
+    return {r["kind"]: _run_row(r) for r in rows}
+
+
+def runs_on(conn: sqlite3.Connection, local_date: date, tz=None) -> list[dict]:
+    """Runs that started on the given local calendar date, oldest first."""
+    return [_run_row(r) for r in conn.execute("SELECT * FROM runs ORDER BY id").fetchall()
+            if _local_date(r["started_at"], tz) == local_date]
+
+
+def today_summary(conn: sqlite3.Connection, today: date, tz=None) -> dict:
+    """What happened on `today` (local): new jobs by source, pipeline/closed moves, upcoming
+    interviews, today's digest run id and the last run of each kind."""
+    new_by_source: dict[str, int] = {}
+    for j in list_jobs(conn, added_on=today, tz=tz):
+        k = "scan" if j.get("source") in SCAN_SOURCES else (j.get("source") or "other")
+        new_by_source[k] = new_by_source.get(k, 0) + 1
+    new_by_source = dict(sorted(new_by_source.items(), key=lambda kv: (-kv[1], kv[0])))
+    moved, prev_job, prev_status = 0, None, None
+    for e in conn.execute("SELECT job_id, status, at FROM job_events ORDER BY job_id, id"):
+        first = e["job_id"] != prev_job
+        changed = first or e["status"] != prev_status  # a note-only event repeats the status
+        prev_job, prev_status = e["job_id"], e["status"]
+        if changed and e["status"] in PIPELINE + CLOSED and _local_date(e["at"], tz) == today:
+            moved += 1
+    digest_id = None
+    for r in conn.execute("SELECT id, path FROM runs WHERE kind = 'digest' ORDER BY id"):
+        if Path(r["path"] or "").stem == today.isoformat():
+            digest_id = r["id"]
+    return {"new_by_source": new_by_source, "moved": moved,
+            "interviews_upcoming": len(list_interviews(conn, now=_now())),
+            "digest_run_id": digest_id, "last_runs": last_runs(conn)}
+
+
+def last_morning_run(conn: sqlite3.Connection, tz=None) -> dict | None:
+    """{'at': datetime, 'ok': bool} for the newest run's local day, or None when nothing ran.
+    A step error that starts with 'skipped: ' is not a failure."""
+    def _started(r: dict) -> datetime | None:
+        try:
+            at = datetime.fromisoformat(r["started_at"])
+        except (TypeError, ValueError):
+            return None
+        return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+    parsed = [(t, r) for r in last_runs(conn).values() if r["kind"] != "digest"
+              if (t := _started(r)) is not None]
+    if not parsed:
+        return None
+    newest = max(parsed, key=lambda tr: tr[0])[1]
+    day = _local_date(newest["started_at"], tz)
+    steps = runs_on(conn, day, tz)
+    ok = all(not r["error"] or r["error"].startswith("skipped: ") for r in steps)
+    at = datetime.fromisoformat(newest["started_at"])
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return {"at": at.astimezone(tz), "ok": ok}
+
+
+# --- job materials ---------------------------------------------------------
+
+def save_material(conn: sqlite3.Connection, job_id: int, folder: str, kind: str,
+                  path: str, mtime: str) -> None:
+    conn.execute(
+        """INSERT INTO job_materials (job_id, folder, kind, path, mtime) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(path) DO UPDATE SET job_id = excluded.job_id, folder = excluded.folder,
+             kind = excluded.kind, mtime = excluded.mtime""",
+        (job_id, folder, kind, path, mtime))
+    conn.commit()
+
+
+def list_materials(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    """A job's files, newest folder first."""
+    rows = conn.execute(
+        "SELECT * FROM job_materials WHERE job_id = ? ORDER BY folder DESC, kind, id",
+        (job_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def material_paths(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT path FROM job_materials")}

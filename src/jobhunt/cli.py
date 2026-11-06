@@ -10,6 +10,10 @@ from . import importer  # noqa: E402
 
 REGISTRARS.append(importer.register)
 
+from . import daily  # noqa: E402
+
+REGISTRARS.append(daily.register)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jobhunt", description="Local job-search tool")

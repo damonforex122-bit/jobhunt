@@ -15,12 +15,12 @@ def test_parse_job_history_both_table_shapes():
     assert len(seven_col) >= 2 and len(phd_col) >= 2
 
     exa = by_title["Research, Evals"]
-    assert (exa.score, exa.job.status, exa.job.source) == (8, "needs", "import")
+    assert (exa.score, exa.status_cell, exa.job.source) == (8, "needs", "proficiently")
     assert exa.job.first_seen == "2026-10-30"
     assert exa.reason and exa.reason.startswith("Strong overlap")
 
     aq = by_title["Research Scientist - Frontier Evaluations"]
-    assert (aq.score, aq.job.status) == (8, "ready")
+    assert (aq.score, aq.status_cell) == (8, "ready")
     assert aq.reason and aq.reason.startswith("Strong overlap")  # not the PhD column
 
 
@@ -33,7 +33,7 @@ def test_parse_job_history_skips_rows_without_url():
     )
     imported = parse_job_history(text)
     assert [i.job.company for i in imported] == ["B"]
-    assert imported[0].score is None and imported[0].job.status == "weird"
+    assert imported[0].score is None and imported[0].status_cell == "weird"
 
 
 def test_parse_people_md():
@@ -63,8 +63,8 @@ def test_run_import_idempotent(conn):
     assert (aq.ats, aq.slug) == ("ashby", "AfterQuery")
     job = next(j for j in db.list_jobs(conn) if j["company"] == "AfterQuery")
     assert job["description"]
-    fit = db.get_fit(conn, job["id"])
-    assert fit.llm_score == 8 and fit.keyword_score == 0 and fit.model == "proficiently-import"
+    assert db.get_fit(conn, job["id"]) is None
+    assert job["prof_score"] == 8
     assert [p.name for p in db.list_people(conn, "AfterQuery")] == ["Spencer Mateega"]
 
 

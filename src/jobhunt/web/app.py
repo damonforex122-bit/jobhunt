@@ -27,6 +27,7 @@ from ..gmail.invites import local_tz
 from ..models import CLOSED, PIPELINE, STATUSES, TRIAGE, Preferences
 from ..people.finder import find_people
 from ..sources import by_link
+from ..sources.proficiently_files import apply_sheet_needs
 from ..tailor import agents, tailor_job
 from ..tailor.master_ai import preview_summary, verify_ai_full
 from ..tailor.master import MasterError, _pdf_text, load_master_with_sha, master_sha256
@@ -38,6 +39,8 @@ SHA_RE = re.compile(r"[0-9a-f]{64}")
 KEY_LABELS = {"gemini_api_key": "Gemini", "anthropic_api_key": "Anthropic",
               "openrouter_api_key": "OpenRouter", "apollo_api_key": "Apollo", "exa_api_key": "Exa",
               "gmail_app_password": "Gmail app password"}
+
+JOB_SOURCES = ("proficiently", "scan", "link", "gmail")
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -200,15 +203,18 @@ def create_app(settings: Settings) -> FastAPI:
                     **extra)
 
     def jobs_page(request: Request, conn, status: str = "", min_score: str = "",
-                  company: str = "", **extra) -> HTMLResponse:
+                  company: str = "", new: str = "", source: str = "", **extra) -> HTMLResponse:
         jobs = db.list_jobs(
             conn,
             status=status or None,
             min_score=int(min_score) if min_score.strip().isdigit() else None,
             company=company or None,
+            source=source if source in JOB_SOURCES else None,
+            added_on=datetime.now().astimezone().date() if new == "today" else None,
         )
         return render(request, "jobs.html", jobs=jobs, statuses=STATUSES, status=status,
-                      min_score=min_score, company=company,
+                      min_score=min_score, company=company, new=new, source=source,
+                      sources=JOB_SOURCES,
                       final_ids=db.final_job_ids(conn),
                       **{"add_url": "", "add_needs_text": False, "add_error": None, **extra})
 
@@ -219,11 +225,11 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, conn: Conn, status: str = "", min_score: str = "",
-              company: str = ""):
+              company: str = "", new: str = "", source: str = ""):
         if (not profile_store.get(conn, "setup_done")
                 and profile_store.effective_master_path(conn, settings) is None):
             return RedirectResponse("/setup", status_code=303)
-        return jobs_page(request, conn, status, min_score, company)
+        return jobs_page(request, conn, status, min_score, company, new, source)
 
     @app.post("/jobs/add", response_class=HTMLResponse)
     def post_add_job(request: Request, conn: Conn,
@@ -241,11 +247,69 @@ def create_app(settings: Settings) -> FastAPI:
             return RedirectResponse(f"/?msg={quote(str(e))}", status_code=303)
         return RedirectResponse(f"/jobs/{job_id}/review?start=1", status_code=303)
 
+    def prof_file(path_str: str | None) -> Path | None:
+        """The recorded path if it is a regular file inside the Proficiently folder, else None."""
+        if not path_str or settings.proficiently_dir is None:
+            return None
+        try:
+            path = Path(path_str).resolve()
+            if path.is_file() and path.is_relative_to(settings.proficiently_dir.resolve()):
+                return path
+        except (OSError, RuntimeError, ValueError):
+            pass
+        return None
+
+    def serve_prof_file(path_str: str | None) -> Response:
+        path = prof_file(path_str)
+        if path is None:
+            raise HTTPException(404, "file not found")
+        ext = path.suffix.lower()
+        if ext == ".pdf":
+            return FileResponse(path, media_type="application/pdf", content_disposition_type="inline",
+                                filename=path.name)
+        if ext == ".docx":
+            return FileResponse(path, content_disposition_type="attachment", filename=path.name,
+                                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            raise HTTPException(404, "file not found")
+        return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+
+    @app.get("/files/{material_id}")
+    def get_material(material_id: int, conn: Conn):
+        row = conn.execute("SELECT path FROM job_materials WHERE id = ?", (material_id,)).fetchone()
+        return serve_prof_file(row["path"] if row else None)
+
+    @app.get("/digests/{run_id}")
+    def get_digest(run_id: int, conn: Conn):
+        row = conn.execute("SELECT path FROM runs WHERE id = ? AND kind = 'digest'", (run_id,)).fetchone()
+        return serve_prof_file(row["path"] if row else None)
+
+    def materials_ctx(conn, job_id: int) -> dict:
+        labels = {"resume_pdf": "Resume (PDF)", "resume_md": "Resume (Markdown)",
+                  "resume_docx": "Resume (Word)", "cover_letter": "Cover letter",
+                  "apply_sheet": "Apply sheet", "warm_intros": "Warm intros", "posting": "Posting"}
+        materials, needs = [], []
+        for m in db.list_materials(conn, job_id):
+            if m["kind"] not in labels:
+                continue
+            materials.append({**m, "label": labels[m["kind"]]})
+            if m["kind"] == "apply_sheet" and not needs:
+                sheet = prof_file(m["path"])
+                if sheet is not None:
+                    try:
+                        needs = apply_sheet_needs(sheet.read_text(errors="replace"))
+                    except OSError:
+                        needs = []
+        return dict(materials=materials, needs=needs)
+
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: int, conn: Conn):
         job = job_or_404(conn, job_id)
         return render(request, "job.html", triage=TRIAGE, pipeline=PIPELINE, closed=CLOSED,
-                      events=db.list_events(conn, job_id), **panel_ctx(conn, job))
+                      events=db.list_events(conn, job_id), **materials_ctx(conn, job_id),
+                      **panel_ctx(conn, job))
 
     @app.post("/jobs/{job_id}/fit", response_class=HTMLResponse)
     def post_fit(request: Request, job_id: int, conn: Conn,
@@ -295,7 +359,7 @@ def create_app(settings: Settings) -> FastAPI:
         if status not in STATUSES:
             raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
         job_or_404(conn, job_id)
-        db.set_job_status(conn, job_id, status, note=note[:1000])
+        db.set_job_status(conn, job_id, status, note=note[:1000], source="user")
         if request.headers.get("HX-Request"):  # Jobs-list dropdown or a board drop
             return TEMPLATES.TemplateResponse(request, "_status_select.html",
                                               {"j": job_or_404(conn, job_id)})
@@ -303,7 +367,10 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/pipeline", response_class=HTMLResponse)
     def pipeline_page(request: Request, conn: Conn):
+        today = datetime.now().astimezone().date()
+        summary = db.today_summary(conn, today)
         return render(request, "pipeline.html", board=db.pipeline_board(conn),
+                      today=summary, last_run=db.last_morning_run(conn),
                       pipeline=PIPELINE, closed=CLOSED,
                       suggestions=db.list_gmail_suggestions(conn),
                       gmail_connected=gmail_connected(settings),
