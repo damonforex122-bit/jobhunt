@@ -14,6 +14,7 @@ from jobhunt.fit import grade_job
 from jobhunt.fit.gemini import build_prompt
 from jobhunt.migrate import OLD_AI_NOTES
 from jobhunt.models import Job
+from jobhunt.profile import load_preferences
 from jobhunt.tailor import agents
 from jobhunt.tailor.output import choose_path, resume_base_name
 from jobhunt.web.app import create_app
@@ -185,14 +186,16 @@ def home(tmp_path, monkeypatch):
 def test_migrate_profile_carries_over_and_is_idempotent(home, capsys):
     assert main(["migrate-profile"]) == 0
     out = capsys.readouterr().out
-    assert "MASTER_RESUME_PATH" in out and "preferences" in out
+    assert "MASTER_RESUME_PATH" in out and "preferences" not in out
 
     s = load_settings()
     assert s.master_resume_path == home / "Documents/Resume/Georgia Liu - Master Resume.pdf"
     assert s.resume_output_dir == home / "Documents/Resume"
     assert s.proficiently_dir == home / "Documents/Resume/.proficiently"
     conn = db.connect(s.db_path)
-    prefs = profile_store.get_preferences(conn)
+    assert profile_store.get_preferences(conn) is None  # no frozen snapshot: the live folder is used
+    prefs = profile_store.effective_preferences(conn, s)
+    assert prefs == load_preferences(home / "Documents/Resume/.proficiently")
     assert prefs.salary_floor == 200000 and prefs.locations == ["Boston"]
     assert profile_store.get_ai_notes(conn) == OLD_AI_NOTES
     assert profile_store.get(conn, "setup_done") is True

@@ -9,7 +9,6 @@ from pathlib import Path
 from . import db, profile_store
 from .config import _read_dotenv, load_settings, reload_settings
 from .envfile import update_env
-from .profile import load_preferences
 
 OLD_AI_NOTES = (
     '- Say "building", not "built", when describing my benchmark; it is still in progress.\n'
@@ -42,10 +41,8 @@ def migrate(settings) -> list[str]:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(settings.db_path)
     try:
-        pdir = settings.proficiently_dir
-        if profile_store.get_preferences(conn) is None and pdir is not None and Path(pdir).is_dir():
-            profile_store.save_preferences(conn, load_preferences(pdir))
-            actions.append("Saved job preferences")
+        # Preferences are not copied: with no saved snapshot they are read live from the
+        # Proficiently folder (`effective_preferences`), so they stay in step with it.
         if not profile_store.get_ai_notes(conn):
             profile_store.save_ai_notes(conn, OLD_AI_NOTES)
             actions.append("Saved notes for the AI")
@@ -62,7 +59,7 @@ def migrate(settings) -> list[str]:
 
 def register(sub) -> None:
     p = sub.add_parser("migrate-profile",
-                       help="Carry the original install's paths, preferences and notes into the new settings")
+                       help="Carry the original install's paths and notes into the new settings")
 
     def handler(args) -> int:
         for line in migrate(load_settings()) or ["nothing to change"]:
