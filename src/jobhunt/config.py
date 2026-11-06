@@ -66,7 +66,8 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
     kwargs = {
         field: env[field.upper()]
         for field in Settings.model_fields
-        if env.get(field.upper())  # empty values (as in .env.example) count as unset
+        if field != "env_path"  # always the file we were given, never from the environment
+        and env.get(field.upper())  # empty values (as in .env.example) count as unset
     }
     return Settings(**kwargs, env_path=env_file)
 

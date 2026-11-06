@@ -18,7 +18,7 @@ from .agents import AgentError, Draft, DraftBullet, DraftEntry, DraftSkills
 from .check import assemble
 from .master import MasterError, load_confirmed_master
 from .model import Bullet, Link, Resume
-from .output import (choose_path, company_folder, file_base_name, file_sha256, file_base_name, reusable_owned,
+from .output import (choose_path, company_folder, file_base_name, file_sha256, reusable_owned,
                      write_atomic)
 from .render import fit_to_pages
 

@@ -20,3 +20,21 @@ def test_paths_are_expanded(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", "~/x.db")
     s = load_settings(tmp_path / "none")
     assert s.proficiently_dir == tmp_path / "prof" and s.db_path == tmp_path / "x.db"
+
+
+def test_env_path_in_the_environment_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV_PATH", str(tmp_path / "other.env"))
+    s = load_settings(tmp_path / ".env")
+    assert s.env_path == tmp_path / ".env"
+
+
+def test_env_example_has_no_env_path():
+    from pathlib import Path
+    example = Path(__file__).resolve().parents[1] / ".env.example"
+    assert "ENV_PATH" not in example.read_text()
+
+
+def test_tailor_imports_file_base_name_once():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "src/jobhunt/tailor/__init__.py").read_text()
+    assert src.count("file_base_name,") + src.count("file_base_name)") <= 1
