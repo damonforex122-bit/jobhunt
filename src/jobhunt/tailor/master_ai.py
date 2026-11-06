@@ -98,13 +98,22 @@ Hard rules:
 
 
 def _header_urls(reader: PdfReader, labels: list[str]) -> list[str]:
-    """URLs of the header links: link annotations on the lines of page 1 that show a link label."""
+    """URLs of the header links (link annotations on the lines of page 1 that show a link label),
+    returned in the order of `labels`: each label takes the URL at its own place on the page (row,
+    then left to right). [] when a label can't be placed or two labels share a place."""
     if not labels:
         return []
     ys: list[float] = []
+    places: dict[int, tuple[int, int]] = {}  # label index -> (row, position in the line)
     for ln in [ln for ln in _lines(reader) if ln.page == 0][:8]:
         if any(_squash(label) in _squash(ln.text) for label in labels if label.strip()):
             ys.append(ln.y)
+        for k, label in enumerate(labels):
+            at = ln.text.find(" ".join(label.split())) if label.strip() else -1
+            if at >= 0 and k not in places:
+                places[k] = (round(-ln.y / 10), at)
+    if len(places) != len(labels) or len(set(places.values())) != len(labels):
+        return []
     found: list[tuple[int, float, str]] = []
     for x, y, uri in link_annotations(reader, 0):
         if any(abs(y - ly) < 15 for ly in ys) and uri.lower().startswith(_SAFE_URL_PREFIXES):
@@ -113,7 +122,13 @@ def _header_urls(reader: PdfReader, labels: list[str]) -> list[str]:
     for _, _, uri in sorted(found):
         if not urls or urls[-1] != uri:
             urls.append(uri)
-    return urls
+    if len(urls) != len(labels):
+        return urls  # `to_resume` won't pair them
+    by_place = sorted(range(len(labels)), key=lambda k: places[k])
+    paired = [""] * len(labels)
+    for rank, k in enumerate(by_place):
+        paired[k] = urls[rank]
+    return paired
 
 
 def to_resume(read: ResumeRead, urls: list[str]) -> Resume:
@@ -472,7 +487,8 @@ def preview_summary(resume: Resume, left_out: list[str] | None = None) -> dict:
     """The whole read, for the user to check before it is used. Plain data; the template escapes it."""
     return {
         "name": resume.header.name,
-        "contact": [*resume.header.contact, *(f"{lk.label}" for lk in resume.header.links)],
+        "contact": list(resume.header.contact),
+        "links": [{"label": lk.label, "url": lk.url} for lk in resume.header.links],
         "summary": resume.summary,
         "roles": [{"org": e.org, "title": e.title, "dates": e.dates, "location": e.location, "blurb": e.blurb,
                    "bullets": [b.text for b in e.bullets]} for e in resume.experience],

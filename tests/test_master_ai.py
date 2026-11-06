@@ -646,6 +646,7 @@ def test_preview_escapes_everything(web, settings, pdf, monkeypatch):
     profile_store.save_pending_master(conn, profile_store.MasterInfo(
         path="x", sha256="0" * 64, name="n", uploaded_at="t"),
         {"name": "<script>alert(1)</script>", "contact": ["<b>x</b>"], "summary": "<u>sum</u>",
+         "links": [{"label": "<kbd>L</kbd>", "url": "javascript:<dfn>u</dfn>"}],
          "roles": [{"org": "<img src=x onerror=1>", "title": "t", "dates": "d", "location": "l", "blurb": "<s>b</s>",
                     "bullets": ["<svg onload=1>"]}],
          "skills": [{"name": "<u>s</u>", "items": ["<i>i</i>"]}],
@@ -654,7 +655,7 @@ def test_preview_escapes_everything(web, settings, pdf, monkeypatch):
     conn.close()
     page = web.get("/profile/master/preview").text
     assert "Not included from your PDF" in page and "&lt;em&gt;Intern Co" in page
-    for raw in ("<script>", "<img", "<b>x", "<u>", "<s>b", "<svg", "<i>i", "<q>", "<marquee"):
+    for raw in ("<script>", "<img", "<b>x", "<u>", "<s>b", "<svg", "<i>i", "<q>", "<marquee", "<kbd>", "<dfn>", "href"):
         assert raw not in page
     assert "&lt;script&gt;" in page
 
@@ -837,3 +838,49 @@ def test_ai_provider_failure_is_not_blamed_on_the_pdf(conn, pdf, settings):
         load_master_with_sha(conn, pdf, client=FakeGemini(exc=agents.AgentError("401 bad key")), settings=settings)
     with pytest.raises(MasterError, match="Couldn't reach your AI provider"):
         load_master_with_sha(conn, pdf, client=FakeGemini(exc=RuntimeError("boom k-test")), settings=settings)
+
+
+# --- final review: link pairing by position, preview layout -----------------------------------------
+
+def two_links_pdf(path):
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setFont("Helvetica", 9)
+    for k, t in enumerate(["Pat Lee", "pat@example.com | LinkedIn | GitHub", "EXPERIENCE", "Acme", "Engineer",
+                           "2019 - 2020", "- Built a thing that mattered a lot."]):
+        c.drawString(40, 760 - 12 * k, t)
+    c.linkURL("https://linkedin.com/in/pat", (120, 746, 160, 756))
+    c.linkURL("https://github.com/pat", (170, 746, 200, 756))
+    c.save()
+    return path
+
+
+@pytest.mark.parametrize("order", [["LinkedIn", "GitHub"], ["GitHub", "LinkedIn"]])
+def test_link_labels_pair_with_urls_by_their_place_in_the_pdf(tmp_path, order):
+    p = two_links_pdf(tmp_path / "lk.pdf")
+    read = plain(links=[LinkRead(label=lb) for lb in order], experience=[role("Acme", ["Built a thing that mattered a lot."])])
+    res = to_resume(read, master_ai._header_urls(master.PdfReader(p), order))
+    assert dict((lk.label, lk.url) for lk in res.header.links) == {
+        "LinkedIn": "https://linkedin.com/in/pat", "GitHub": "https://github.com/pat"}
+
+
+def test_link_labels_that_cannot_be_placed_get_no_urls(tmp_path):
+    p = two_links_pdf(tmp_path / "lk.pdf")
+    assert master_ai._header_urls(master.PdfReader(p), ["Git", "GitHub"]) == []  # same place: ambiguous
+
+
+def test_preview_shows_each_links_url(web, settings, pdf):
+    upload(web, pdf)
+    page = web.get("/profile/master/preview").text
+    assert "LinkedIn" in page and LINKEDIN in page
+
+
+def test_preview_is_one_vertical_column(web, settings, pdf):
+    upload(web, pdf)
+    page = web.get("/profile/master/preview").text
+    at = page.index('id="master-preview"')
+    top = page[max(0, at - 200):at + 50]
+    assert "alert" not in top and "flex-col" in top
+    assert 'class="space-y-3"' in page and 'class="list-disc ml-6"' in page
+    assert "flex-row" not in page and "pl-5" not in page
+    head = page.index("Check that every bullet sits under the right job")
+    assert page.index('class="space-y-3"') > head

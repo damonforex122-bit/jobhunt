@@ -1,22 +1,27 @@
 {% if pending %}{% set s = pending.summary %}
-<div class="alert alert-info flex-col items-start gap-3" id="master-preview">
+<div class="flex flex-col gap-3 rounded-box border border-info bg-base-100 p-4" id="master-preview">
 <p class="font-bold">Check that every bullet sits under the right job. If anything is in the wrong place, choose Try another file.</p>
+<div class="space-y-3">
+<div>
 <p><strong>{{ s.name }}</strong>{% if s.contact %} · {{ s.contact | join(" · ") }}{% endif %}</p>
+{% if s.links %}<ul class="list-disc ml-6">{% for lk in s.links %}<li>{{ lk.label }} <span class="text-xs opacity-70 break-all">{{ lk.url }}</span></li>{% endfor %}</ul>{% endif %}
+</div>
 {% if s.summary %}<p>{{ s.summary }}</p>{% endif %}
 {% for r in s.roles %}<div class="role">
 <p class="font-semibold">{{ [r.org, r.title, r.dates, r.location] | select | join(" — ") }}</p>
 {% if r.blurb %}<p class="italic">{{ r.blurb }}</p>{% endif %}
-<ul class="list-disc pl-5">{% for b in r.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+<ul class="list-disc ml-6">{% for b in r.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
 </div>{% else %}<p>No roles found</p>{% endfor %}
-{% if s.skills %}<div><p class="font-semibold">Skills</p><ul class="list-disc pl-5">
+{% if s.skills %}<div><p class="font-semibold">Skills</p><ul class="list-disc ml-6">
 {% for k in s.skills %}<li>{{ k.name }}: {% for it in k["items"] %}<span class="badge badge-outline">{{ it }}</span> {% endfor %}</li>{% endfor %}</ul></div>{% endif %}
-{% if s.education %}<div><p class="font-semibold">Education</p><ul class="list-disc pl-5">
+{% if s.education %}<div><p class="font-semibold">Education</p><ul class="list-disc ml-6">
 {% for e in s.education %}<li>{{ [e.school, e.detail, e.dates] | select | join(" — ") }}</li>{% endfor %}</ul></div>{% endif %}
-{% if s.publications %}<div><p class="font-semibold">Publications</p><ul class="list-disc pl-5">
+{% if s.publications %}<div><p class="font-semibold">Publications</p><ul class="list-disc ml-6">
 {% for t in s.publications %}<li>{{ t }}</li>{% endfor %}</ul></div>{% endif %}
 {% if s.left_out %}<div><p class="font-semibold">Not included from your PDF:</p>
-<ul class="list-disc pl-5">{% for t in s.left_out %}<li>{{ t }}</li>{% endfor %}</ul></div>{% endif %}
-<div class="flex gap-2">
+<ul class="list-disc ml-6">{% for t in s.left_out %}<li>{{ t }}</li>{% endfor %}</ul></div>{% endif %}
+</div>
+<div class="flex flex-wrap gap-2">
 <form method="post" action="/profile/master/confirm"><input type="hidden" name="sha" value="{{ pending.info.sha256 }}">{% if confirm_next %}<input type="hidden" name="next" value="{{ confirm_next }}">{% endif %}<button class="btn btn-primary">Use this resume</button></form>
 <form method="post" action="/profile/master/cancel">{% if cancel_next %}<input type="hidden" name="cancel_next" value="{{ cancel_next }}">{% endif %}<button class="btn btn-ghost">Try another file</button></form>
 </div>
