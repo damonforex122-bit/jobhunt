@@ -227,6 +227,21 @@ def _ends_experience(k, sec_lines, owners, line_text, is_heading) -> bool:
     return False
 
 
+def _experience_top(sec_lines, owners, line_text, is_heading, n_lines) -> int:
+    """The last line of the experience section: it runs on until the next section visibly starts
+    (or the end of the document)."""
+    top = max(sec_lines[2])
+    while top + 1 < n_lines and not _ends_experience(top + 1, sec_lines, owners, line_text, is_heading):
+        top += 1
+    return top
+
+
+def _heads_a_section(t: str) -> bool:
+    """Short, no digits, set like a heading ('Core Competencies', 'SKILLS:')."""
+    t = " ".join(t.split())
+    return len(t) <= 25 and not any(c.isdigit() for c in t) and (t.isupper() or t.istitle()) and _looks_like_heading(t)
+
+
 def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading, n_lines) -> list[str]:
     """Checks that text sits with the section and role it came from (no moving of lines around)."""
     out: list[str] = []
@@ -254,10 +269,7 @@ def _attribution(resume, where, owners, sec_lines, paras, line_text, is_heading,
     for si, lines in sec_lines.items():
         if si == 0:
             continue
-        top = max(lines)
-        if si == 2:  # experience runs on until the next section visibly starts (or the end of the document)
-            while top + 1 < n_lines and not _ends_experience(top + 1, sec_lines, owners, line_text, is_heading):
-                top += 1
+        top = _experience_top(sec_lines, owners, line_text, is_heading, n_lines) if si == 2 else max(lines)
         for k in range(min(lines), top + 1):
             if owners.get(k, set()) - {si}:
                 out.append(f"sections are mixed up near: {line_text(k).strip()[:40]}")
@@ -322,13 +334,39 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
     sec_lines: dict[int, list[int]] = {}
     where: dict[str, tuple[int, int]] = {}  # "role:field" -> first and last line
     paras: list[tuple[int, int, bool]] = []  # (first line, last line, started after a marker)
+    para_ends: list[int] = []  # last line of every bullet, summary, blurb and publication
+
+    def same_tokens(text: str, i: int) -> bool:
+        """The read's spaces inside the match agree with the PDF's: squashing would otherwise let
+        "2 10-person" become "210-person" or "not attend" become "notattend". Only gaps between two
+        letters/digits matter (a gap next to punctuation doesn't change a word or number). A word may
+        be joined across a line break in the PDF (a wrapped word); digit runs never."""
+        gaps: list[bool] = []  # for each non-space char after the first: is there a space before it?
+        prev_space = False
+        for ch in text.strip():
+            if ch.isspace():
+                prev_space = True
+            else:
+                gaps.append(prev_space)
+                prev_space = False
+        gaps = gaps[1:]
+        for m, read_gap in enumerate(gaps, start=1):
+            a, b = hay[i + m - 1], hay[i + m]
+            if not (a.isalnum() and b.isalnum()):
+                continue
+            between = raw[orig[i + m - 1] + 1:orig[i + m]]
+            if read_gap == bool(between):
+                continue
+            if read_gap or "\n" not in between or (a.isdigit() and b.isdigit()):
+                return False
+        return True
 
     def locate(text: str, kind: str, start: int):
         needle = _squash(text)
         i = hay.find(needle, start)
         while i >= 0:
             j = i + len(needle)
-            if not any(covered[i:j]) and ok(i, j, kind):
+            if not any(covered[i:j]) and ok(i, j, kind) and same_tokens(text, i):
                 return i, j
             i = hay.find(needle, i + 1)
         return None
@@ -356,6 +394,8 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
                     where[tag] = (first, last)
                 if kind == "para":
                     paras.append((first, last, bool(raw[spans[first][0]:orig[i]].strip())))
+                if kind in ("para", "sumpara"):
+                    para_ends.append(last)
                 if si == 2:
                     exp_lines += [first, last]
             pos = group_end
@@ -372,20 +412,27 @@ def verify_ai_full(resume: Resume, pdf_text: str) -> tuple[list[str], list[str]]
     for n in sorted(touched):
         if uncovered(n):
             problems.append(f"only part of this line was read: {line_text(n).strip()[:40]}")
-    if exp_lines:
-        for n in range(min(exp_lines), max(exp_lines) + 1):
+    if exp_lines:  # up to where the experience section ends, so a cut-off last bullet shows too
+        for n in range(min(exp_lines), _experience_top(sec_lines, owners, line_text, _is_heading, len(spans)) + 1):
             text = uncovered(n)
             line = line_text(n).strip()
             if len(text) > 3 and not _is_heading(line) and not _PAGE_NO.fullmatch(line):
                 problems.append(f"skipped between roles: {line[:40]}")
+    for last in para_ends:  # the wrapped end of a bullet, summary, blurb or publication left off
+        if last + 1 < len(spans):
+            line = line_text(last + 1).strip()
+            nxt = owners.get(last + 2, set())
+            heading = _is_heading(line) or (_heads_a_section(line) and bool(nxt))
+            if (uncovered(last + 1) and not owners.get(last + 1) and not _is_marker_line(line) and not heading
+                    and not _PAGE_NO.fullmatch(line)):
+                problems.append(f"the end of this was left off: {line[:40]}")
     if problems:
         return problems, []
 
     ignorable = [False] * len(hay)
     def heads_a_section(n: int) -> bool:  # an unread "Skills:" right above the skills it heads
-        nxt, t = owners.get(n + 1, set()), " ".join(line_text(n).split())
-        short = len(t) <= 25 and not any(c.isdigit() for c in t) and (t.isupper() or t.istitle())
-        return not owners.get(n) and short and _looks_like_heading(t) and bool(nxt) and 2 not in nxt
+        nxt = owners.get(n + 1, set())
+        return not owners.get(n) and _heads_a_section(line_text(n)) and bool(nxt) and 2 not in nxt
 
     for n in range(len(spans)):  # headings are not content
         if _is_heading(line_text(n)) or heads_a_section(n):

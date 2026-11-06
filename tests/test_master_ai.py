@@ -333,7 +333,7 @@ def test_a_caps_company_name_is_not_mistaken_for_a_heading(tmp_path):
     assert verdict(dropped, text)
 
 
-def test_small_trailing_role_left_out_is_reported(tmp_path):
+def test_small_trailing_role_left_out_is_rejected(tmp_path):  # the experience section runs to the end
     lines = ["Pat Lee", "pat@example.com", "EXPERIENCE"]
     roles = []
     for i in range(8):
@@ -342,8 +342,8 @@ def test_small_trailing_role_left_out_is_reported(tmp_path):
         roles.append(role(f"Company{i} Ltd", bs))
     lines += ["Intern Co", "Engineer", "2019 - 2020", "- Fixed bugs."]
     text = lines_pdf(tmp_path / "e.pdf", lines)
-    found, left = verify_ai_full(to_resume(plain(experience=roles), []), text)
-    assert found == [] and any("Intern Co" in t for t in left)
+    found, _ = verify_ai_full(to_resume(plain(experience=roles), []), text)
+    assert any("Intern Co" in t for t in found)
 
 
 def test_preview_lists_what_was_left_out(settings, pdf, monkeypatch):
@@ -685,3 +685,65 @@ def test_confirm_without_a_pending_upload_is_harmless(web):
 def test_upload_posts_reject_cross_site(web):
     for path in ("/profile/master/confirm", "/profile/master/cancel"):
         assert web.post(path, headers={"Origin": "http://evil.example"}).status_code == 403
+
+
+# --- final review: whitespace inside a match, truncated last lines -------------------------------
+
+WS_HEAD = ["Pat Lee", "pat@example.com", "EXPERIENCE", "Acme", "Engineer", "2019 - 2020"]
+
+
+@pytest.mark.parametrize("pdf_bullet, read_bullet", [
+    ("Managed 2 10-person teams.", "Managed 210-person teams."),
+    ("Grew revenue 100% in 2020.", "Grew revenue 10 0% in 2020."),
+    ("Did not attend.", "Did notattend."),
+])
+def test_whitespace_changes_inside_a_match_are_rejected(tmp_path, pdf_bullet, read_bullet):
+    text = lines_pdf(tmp_path / "ws.pdf", [*WS_HEAD, f"- {pdf_bullet}"])
+    assert verdict(plain(experience=[role("Acme", [pdf_bullet])]), text) == []
+    assert verdict(plain(experience=[role("Acme", [read_bullet])]), text)
+
+
+def test_digits_joined_across_a_line_break_are_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "ws.pdf", [*WS_HEAD, "- Managed 2", "  10-person teams."])
+    assert verdict(plain(experience=[role("Acme", ["Managed 2 10-person teams."])]), text) == []
+    assert verdict(plain(experience=[role("Acme", ["Managed 210-person teams."])]), text)
+
+
+def test_a_line_wrapped_hyphenated_word_still_passes(tmp_path):
+    text = lines_pdf(tmp_path / "ws.pdf", [*WS_HEAD, "- Led a cross-", "  functional team of nine engineers.",
+                                           "- Built the develop", "  ment pipeline."])
+    read = plain(experience=[role("Acme", ["Led a cross-functional team of nine engineers.",
+                                           "Built the development pipeline."])])
+    assert verdict(read, text) == []
+
+
+TR_BULLETS = [f"Built data platform number {i} used by every team in the whole company." for i in range(25)]
+TR_LAST = "Owned the launch of the payments product; it was"
+TR_EDU = [EducationRead(school="State University", detail="BS Computer Science", dates="2015 - 2019")]
+
+
+def test_a_truncated_last_bullet_is_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "tr.pdf", [*WS_HEAD, *("- " + b for b in TR_BULLETS), f"- {TR_LAST}",
+                                           "  cancelled before release.", "EDUCATION", "State University",
+                                           "BS Computer Science", "2015 - 2019"])
+    whole = plain(experience=[role("Acme", [*TR_BULLETS, TR_LAST + " cancelled before release."])], education=TR_EDU)
+    assert verdict(whole, text) == []
+    cut = plain(experience=[role("Acme", [*TR_BULLETS, TR_LAST])], education=TR_EDU)
+    assert verdict(cut, text)
+
+
+def test_a_truncated_last_bullet_at_the_end_of_the_document_is_rejected(tmp_path):
+    text = lines_pdf(tmp_path / "tr.pdf", ["Pat Lee", "pat@example.com", "EDUCATION", "State University",
+                                           "BS Computer Science", "2015 - 2019", *WS_HEAD[2:],
+                                           *("- " + b for b in TR_BULLETS), f"- {TR_LAST}", "  cancelled."])
+    cut = plain(experience=[role("Acme", [*TR_BULLETS, TR_LAST])], education=TR_EDU)
+    assert verdict(cut, text)
+
+
+def test_a_truncated_last_summary_line_is_rejected(tmp_path):
+    summary = ["Backend engineer who builds reliable data systems for finance teams and", "cares about clear ownership."]
+    text = lines_pdf(tmp_path / "tr.pdf", ["Pat Lee", "pat@example.com", "SUMMARY", *summary, *WS_HEAD[2:],
+                                           *("- " + b for b in TR_BULLETS)])
+    whole = plain(summary=" ".join(summary), experience=[role("Acme", TR_BULLETS)])
+    assert verdict(whole, text) == []
+    assert verdict(plain(summary=summary[0], experience=[role("Acme", TR_BULLETS)]), text)
