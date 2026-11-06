@@ -412,6 +412,9 @@ def test_next_rejects_tricky_paths(client, nxt):
 def test_setup_page_not_redirected_or_bannered(client):
     r = client.get("/setup")
     assert r.status_code == 200 and "Finish setting up" not in r.text
+    for step in ("ai", "resume", "people", "done"):
+        page = client.get(f"/setup?step={step}").text
+        assert "Grading is off" not in page and "People search is off" not in page and "alert-warning" not in page
 
 
 def test_partials_skip_banner_check(client, monkeypatch):

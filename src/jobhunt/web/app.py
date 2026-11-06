@@ -119,11 +119,11 @@ def _now_iso() -> str:
 def _banner(s: Settings) -> list[str]:
     msgs = []
     if not s.gemini_api_key:
-        msgs.append("Gemini grading off — set GEMINI_API_KEY")
+        msgs.append("Grading is off — add a Gemini key on the Profile page")
     if not s.apollo_api_key:
-        msgs.append("Apollo people search off — set APOLLO_API_KEY")
+        msgs.append("People search is off — add an Apollo key on the Profile page (optional)")
     if not s.exa_api_key:
-        msgs.append("Exa people search off — set EXA_API_KEY")
+        msgs.append("People search is off — add an Exa key on the Profile page (optional)")
     return msgs
 
 
@@ -177,7 +177,8 @@ def create_app(settings: Settings) -> FastAPI:
             c.close()
 
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
-        ctx.update(banner=_banner(settings), msg=request.query_params.get("msg"),
+        on_setup = request.url.path == "/setup" or request.url.path.startswith("/setup/")
+        ctx.update(banner=[] if on_setup else _banner(settings), msg=request.query_params.get("msg"),
                    setup_pending=False if request.headers.get("HX-Request") else setup_pending())
         return TEMPLATES.TemplateResponse(request, name, ctx)
 

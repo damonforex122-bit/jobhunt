@@ -102,12 +102,15 @@ def test_post_status_valid_persists(client, settings):
 
 def test_banner_shows_missing_keys(client):
     html = client.get("/").text
-    assert "Gemini grading off" in html and "APOLLO_API_KEY" in html and "EXA_API_KEY" in html
+    assert "Grading is off — add a Gemini key on the Profile page" in html
+    assert "People search is off — add an Apollo key on the Profile page (optional)" in html
+    assert "People search is off — add an Exa key on the Profile page (optional)" in html
+    assert "set GEMINI_API_KEY" not in html and "set APOLLO_API_KEY" not in html and "set EXA_API_KEY" not in html
 
 
 def test_banner_hidden_when_keys_set(settings):
     s = settings.model_copy(update={"gemini_api_key": "k", "apollo_api_key": "k", "exa_api_key": "k"})
-    assert "grading off" not in tc(webapp.create_app(s)).get("/").text
+    assert "is off" not in tc(webapp.create_app(s)).get("/").text
 
 
 def test_companies_page_shows_last_error(client):
