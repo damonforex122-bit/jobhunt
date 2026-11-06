@@ -16,7 +16,7 @@ from ..profile_store import (Links, effective_master_path, effective_output_dir,
 from . import agents
 from .agents import AgentError, Draft, DraftBullet, DraftEntry, DraftSkills
 from .check import assemble
-from .master import MasterError, load_master_with_sha
+from .master import MasterError, load_confirmed_master
 from .model import Bullet, Link, Resume
 from .output import (choose_path, company_folder, file_base_name, file_sha256, file_base_name, reusable_owned,
                      write_atomic)
@@ -169,8 +169,7 @@ def tailor_job(conn: sqlite3.Connection, job_id: int, settings: Settings, client
 
     try:
         step("Reading your master resume…")
-        master, master_sha = load_master_with_sha(conn, effective_master_path(conn, settings),
-                                                 client=client, settings=settings)
+        master, master_sha = load_confirmed_master(conn, effective_master_path(conn, settings))
         step("Reading the posting…")
         reqs = agents.read_posting(client, settings, posting, job["company"], job["title"])
         step("Matching it to your resume…")

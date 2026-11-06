@@ -13,7 +13,7 @@ from ..profile_store import effective_master_path, get_ai_notes
 from . import TailorResult, _fail, _finish, agents, resume_from_draft, tailor_job
 from .agents import AgentError, Draft, Matches, Requirements
 from .check import _CAP_TERM, _SENTENCE_SPLIT
-from .master import MasterError, load_master_with_sha
+from .master import MasterError, load_confirmed_master
 from .model import Resume
 
 _TOKEN = re.compile(r"[\w.+#-]+")
@@ -89,8 +89,7 @@ def revise_job(conn: sqlite3.Connection, job_id: int, settings: Settings, instru
     instructions = [*(t["text"] for t in db.list_chat(conn, job_id) if t["role"] == "user"), instruction]
     try:
         step("Reading your master resume…")
-        master, master_sha = load_master_with_sha(conn, effective_master_path(conn, settings),
-                                                 client=client, settings=settings)
+        master, master_sha = load_confirmed_master(conn, effective_master_path(conn, settings))
         reqs = Requirements.model_validate_json(rec["reqs_json"])
         matches = Matches.model_validate_json(rec["matches_json"])
         previous = Draft.model_validate_json(rec["draft_json"]) if rec.get("draft_json") else None

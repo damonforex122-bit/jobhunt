@@ -1,6 +1,7 @@
 """Read the master resume PDF back into a structured Resume, check it, and cache it by file hash."""
 
 import hashlib
+import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -10,7 +11,7 @@ from pypdf import PdfReader
 
 from jobhunt import db
 from jobhunt.config import short_error
-from jobhunt.tailor.providers import has_ai_key
+from jobhunt.tailor.providers import AgentError, has_ai_key
 from jobhunt.tailor.model import (
     Bullet,
     EducationLine,
@@ -374,6 +375,8 @@ def load_master(conn: sqlite3.Connection, path: Path) -> Resume:
 
 
 NO_KEY_MESSAGE = "Add an AI key on the Setup page so the app can read your resume."
+CONFIRM_MESSAGE = "Upload and confirm your resume on the Profile page."
+AI_FAILED_MESSAGE = "Couldn't reach your AI provider — check your key on the Setup page."
 UNRELIABLE_MESSAGE = ("Couldn't read your resume reliably — try exporting it again as PDF from "
                       "Google Docs/Word, or use LinkedIn → More → Save to PDF.")
 
@@ -396,8 +399,10 @@ def load_master_with_sha(conn: sqlite3.Connection, path: Path | None, client=Non
                          settings=None) -> tuple[Resume, str]:
     """Like `load_master`, plus the file hash the cache was keyed on.
 
-    When the strict parser fails and a `client` is given, the AI reads the PDF instead; its read is
-    only kept if every string in it is really in the PDF's text (`master_ai.verify_ai`).
+    The read the user confirmed on the Profile page wins (it survives cache wipes and parser
+    bumps), then the cache, then the strict parser. Only when that fails and a `client` is given
+    (the upload, which then shows the preview) does the AI read the PDF; its read is only kept if
+    every string in it is really in the PDF's text (`master_ai.verify_ai`).
     """
     if path is None:
         raise MasterError("Upload your resume on the Setup page first.")
@@ -405,6 +410,9 @@ def load_master_with_sha(conn: sqlite3.Connection, path: Path | None, client=Non
     if not path.is_file():
         raise MasterError(f"Master resume not found: {path}")
     sha = master_sha256(path)
+    confirmed = _confirmed_read(conn, sha)
+    if confirmed is not None:
+        return confirmed, sha
     key = f"{sha}:v{PARSER_VERSION}"
     cached = db.get_master_cache(conn, key)
     if cached:
@@ -420,6 +428,11 @@ def load_master_with_sha(conn: sqlite3.Connection, path: Path | None, client=Non
 
         try:
             resume = master_ai.parse_master_ai(path, client, settings)
+        except AgentError as e:  # the provider, not the PDF
+            raise MasterError(AI_FAILED_MESSAGE) from e
+        except Exception as e:
+            raise MasterError(UNRELIABLE_MESSAGE) from e
+        try:
             problems = master_ai.verify_ai(resume, _pdf_text(path))
         except Exception as e:
             raise MasterError(UNRELIABLE_MESSAGE) from e
@@ -427,3 +440,28 @@ def load_master_with_sha(conn: sqlite3.Connection, path: Path | None, client=Non
             raise MasterError(UNRELIABLE_MESSAGE)
     db.save_master_cache(conn, key, resume.model_dump_json())
     return resume, sha
+
+
+def _confirmed_read(conn: sqlite3.Connection, sha: str) -> Resume | None:
+    """The read the user confirmed for this exact file (profile key `master_read`), if any."""
+    row = conn.execute("SELECT value FROM profile WHERE key = 'master_read'").fetchone()
+    if row is None:
+        return None
+    data = json.loads(row[0])
+    if not isinstance(data, dict) or data.get("sha") != sha:
+        return None
+    try:
+        return Resume.model_validate_json(data["resume_json"])
+    except Exception:  # an old or damaged row: fall back to the cache and the strict parser
+        return None
+
+
+def load_confirmed_master(conn: sqlite3.Connection, path: Path | None) -> tuple[Resume, str]:
+    """The master for tailoring, revising and grading: never an AI read the user hasn't seen.
+
+    The confirmed read, the cache or the strict parser; anything else asks the user to upload and
+    confirm their resume (which shows the full preview)."""
+    try:
+        return load_master_with_sha(conn, path)
+    except MasterError as e:
+        raise MasterError(CONFIRM_MESSAGE) from e

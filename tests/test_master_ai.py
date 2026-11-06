@@ -188,11 +188,6 @@ def test_unfaithful_ai_read_raises_and_is_not_cached(conn, pdf, settings):
     assert conn.execute("SELECT COUNT(*) FROM master_cache").fetchone()[0] == 0
 
 
-def test_provider_failure_gives_the_same_message(conn, pdf, settings):
-    with pytest.raises(MasterError, match="Save to PDF"):
-        load_master_with_sha(conn, pdf, client=FakeGemini(exc=RuntimeError("boom k-test")), settings=settings)
-
-
 def test_no_ai_key_says_add_one(conn, pdf, settings):
     settings.gemini_api_key = None
     with pytest.raises(MasterError, match="Add an AI key on the Setup page"):
@@ -594,7 +589,7 @@ def test_preview_then_confirm_activates(web, settings, pdf):
                  "Try another file", "Save to PDF"):
         assert want in page
     assert "Use this resume" in web.get("/profile/master/preview").text
-    assert web.post("/profile/master/confirm", follow_redirects=False).status_code == 303
+    assert web.post("/profile/master/confirm", data={"sha": sha}, follow_redirects=False).status_code == 303
     info = profile_store.get_master(conn)
     assert info.sha256 == sha and info.name == "Other.pdf"
     assert (mdir / f"{sha}.pdf").is_file() and not (mdir / f".pending-{sha}.pdf").exists()
@@ -608,7 +603,7 @@ def test_preview_without_confirm_keeps_the_old_master(web, settings, pdf, tmp_pa
     old = tmp_path / "old.pdf"
     render_master_layout(sample_resume(), old)
     web.post("/profile/master", files={"file": ("old.pdf", old.read_bytes(), "application/pdf")})
-    web.post("/profile/master/confirm")
+    web.post("/profile/master/confirm", data={"sha": hashlib.sha256(old.read_bytes()).hexdigest()})
     conn = conn_for(settings)
     before = profile_store.get_master(conn)
     upload(web, pdf)
@@ -747,3 +742,98 @@ def test_a_truncated_last_summary_line_is_rejected(tmp_path):
     whole = plain(summary=" ".join(summary), experience=[role("Acme", TR_BULLETS)])
     assert verdict(whole, text) == []
     assert verdict(plain(summary=summary[0], experience=[role("Acme", TR_BULLETS)]), text)
+
+
+# --- final review: no AI read without the preview; confirm what was previewed; AI errors -----------
+
+CONFIRM = "Upload and confirm your resume on the Profile page."
+
+
+def posting_job(conn):
+    from jobhunt.models import Job
+    return db.upsert_job(conn, Job(company="Acme", title="Engineer", url="https://x.test/1", source="ats",
+                                   description="Build data systems."))[0]
+
+
+def test_tailor_never_reads_an_unconfirmed_master_with_the_ai(conn, pdf, settings):
+    from jobhunt.tailor import tailor_job
+    settings.master_resume_path = pdf  # not strictly readable, never uploaded or confirmed
+    client = fake(faithful())
+    res = tailor_job(conn, posting_job(conn), settings, client=client)
+    assert res.error == CONFIRM and client.calls == []
+
+
+def test_revise_never_reads_an_unconfirmed_master_with_the_ai(conn, pdf, settings):
+    from jobhunt.tailor import revise_job
+    from jobhunt.tailor.agents import Matches, Requirements
+    settings.master_resume_path = pdf
+    j = posting_job(conn)
+    db.save_resume(conn, {"job_id": j, "reqs_json": Requirements(requirements=[]).model_dump_json(),
+                          "matches_json": Matches(matches=[]).model_dump_json()})
+    client = fake(faithful())
+    out = revise_job(conn, j, settings, "shorter", client=client)
+    assert out.result.error == CONFIRM and client.calls == []
+
+
+def test_grading_never_reads_an_unconfirmed_master_with_the_ai(conn, pdf, settings):
+    from jobhunt.fit import grade_job
+    settings.master_resume_path = pdf
+    client = fake(faithful())
+    fit = grade_job(conn, posting_job(conn), settings, client=client)
+    assert fit.error == CONFIRM and client.calls == []
+
+
+def test_missing_master_says_upload_and_confirm(conn, settings):
+    from jobhunt.tailor import tailor_job
+    res = tailor_job(conn, posting_job(conn), settings, client=fake(faithful()))
+    assert res.error == CONFIRM
+
+
+def confirm(web, conn):
+    pending = profile_store.get_pending_master(conn)
+    return web.post("/profile/master/confirm", data={"sha": pending["info"]["sha256"]}, follow_redirects=False)
+
+
+def test_a_confirmed_ai_read_survives_a_cache_wipe_and_a_parser_bump(web, settings, pdf, monkeypatch):
+    from jobhunt.tailor import tailor_job
+    upload(web, pdf)
+    conn = conn_for(settings)
+    assert confirm(web, conn).status_code == 303
+    info = profile_store.get_master(conn)
+    assert profile_store.get(conn, "master_read")["sha"] == info.sha256
+    conn.execute("DELETE FROM master_cache")
+    conn.commit()
+    monkeypatch.setattr(master, "PARSER_VERSION", master.PARSER_VERSION + 1)
+    resume, sha = load_master_with_sha(conn, Path(info.path))
+    assert resume.header.name == "Sam Rivera" and sha == info.sha256
+    client = FakeGemini({}, exc=RuntimeError("stop after the master"))
+    res = tailor_job(conn, posting_job(conn), settings, client=client)
+    assert res.error and CONFIRM not in res.error and "reliably" not in res.error  # failed later: at the posting
+    conn.close()
+
+
+def test_preview_posts_the_pending_sha(web, settings, pdf):
+    upload(web, pdf)
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    assert f'name="sha" value="{sha}"' in web.get("/profile/master/preview").text
+
+
+def test_confirm_refuses_when_the_upload_changed(web, settings, pdf, tmp_path):
+    upload(web, pdf)
+    old_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    other = tmp_path / "second.pdf"
+    render_master_layout(sample_resume(), other)
+    upload(web, other, "second.pdf")
+    for data in ({"sha": old_sha}, {}):
+        r = web.post("/profile/master/confirm", data=data, follow_redirects=False)
+        assert "That upload changed — check the new preview." in unquote(r.headers["location"])
+    conn = conn_for(settings)
+    assert profile_store.get_master(conn) is None and profile_store.get_pending_master(conn)
+    conn.close()
+
+
+def test_ai_provider_failure_is_not_blamed_on_the_pdf(conn, pdf, settings):
+    with pytest.raises(MasterError, match="Couldn't reach your AI provider — check your key on the Setup page."):
+        load_master_with_sha(conn, pdf, client=FakeGemini(exc=agents.AgentError("401 bad key")), settings=settings)
+    with pytest.raises(MasterError, match="Couldn't reach your AI provider"):
+        load_master_with_sha(conn, pdf, client=FakeGemini(exc=RuntimeError("boom k-test")), settings=settings)

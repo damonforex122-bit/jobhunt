@@ -583,7 +583,8 @@ def create_app(settings: Settings) -> FastAPI:
             path=str(master_dir / f"{sha}.pdf"), sha256=sha,
             name=Path(file.filename or "master.pdf").name[:200],
             uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds")),
-            preview_summary(resume, left_out(resume, master_dir / f".pending-{sha}.pdf")))
+            preview_summary(resume, left_out(resume, master_dir / f".pending-{sha}.pdf")),
+            resume.model_dump_json())
         return to_profile("Check how your resume was read, then use it.", next)
 
     @app.get("/profile/master/preview", response_class=HTMLResponse)
@@ -592,11 +593,13 @@ def create_app(settings: Settings) -> FastAPI:
                       pending=profile_store.get_pending_master(conn))
 
     @app.post("/profile/master/confirm")
-    def post_master_confirm(conn: Conn, next: Annotated[str, Form()] = ""):
+    def post_master_confirm(conn: Conn, next: Annotated[str, Form()] = "", sha: Annotated[str, Form()] = ""):
         pending = profile_store.get_pending_master(conn)
         if not pending:
             return to_profile("There is no uploaded resume waiting.", next)
         info = profile_store.MasterInfo(**pending["info"])
+        if not sha or sha != info.sha256:  # confirm only the upload whose preview was shown
+            return to_profile("That upload changed — check the new preview.", next)
         src = pending_file(info.sha256) if SHA_RE.fullmatch(info.sha256) else None
         if src is None or not src.is_file() or master_sha256(src) != info.sha256:
             drop_pending(conn)
@@ -605,6 +608,8 @@ def create_app(settings: Settings) -> FastAPI:
         os.replace(src, dest)
         info.path = str(dest)
         info.uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if pending.get("resume_json"):
+            profile_store.save_master_read(conn, info.sha256, pending["resume_json"])
         profile_store.save_master(conn, info)
         profile_store.clear_pending_master(conn)
         return to_profile("Master resume saved.", next)

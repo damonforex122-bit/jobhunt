@@ -58,7 +58,7 @@ def test_missing_proficiently_folder_gives_empty_preferences(conn, tmp_path):
 def test_no_master_means_grading_error_not_empty_text(conn):
     jid = add(conn)
     fit = grade_job(conn, jid, Settings(gemini_api_key="k"), client=object())
-    assert fit.error == "Upload your resume on the Setup page first."
+    assert fit.error == "Upload and confirm your resume on the Profile page."
     assert fit.llm_score is None
 
 

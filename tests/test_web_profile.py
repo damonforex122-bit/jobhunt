@@ -138,7 +138,7 @@ def test_upload_valid_master_saves_under_data_and_activates(client, settings, tm
     conn = conn_for(settings)
     assert profile_store.get_master(conn) is None  # not active until confirmed
     conn.close()
-    assert client.post("/profile/master/confirm", follow_redirects=False).status_code == 303
+    assert client.post("/profile/master/confirm", data={"sha": sha}, follow_redirects=False).status_code == 303
     dest = settings.db_path.parent / "master" / f"{sha}.pdf"
     assert dest.read_bytes() == data
     assert list(dest.parent.glob("*")) == [dest]
@@ -155,7 +155,7 @@ def test_upload_invalid_pdf_rejected_keeps_old_master(client, settings, tmp_path
     src = tmp_path / "m.pdf"
     render_master_layout(sample_resume(), src)
     client.post("/profile/master", files={"file": ("a.pdf", src.read_bytes(), "application/pdf")})
-    client.post("/profile/master/confirm")
+    client.post("/profile/master/confirm", data={"sha": hashlib.sha256(src.read_bytes()).hexdigest()})
     conn = conn_for(settings)
     before = profile_store.get_master(conn)
     conn.close()

@@ -86,8 +86,14 @@ def get_pending_master(conn: sqlite3.Connection) -> dict | None:
     return get(conn, "pending_master") or None
 
 
-def save_pending_master(conn: sqlite3.Connection, info: MasterInfo, summary: dict) -> None:
-    put(conn, "pending_master", {"info": info.model_dump(), "summary": summary})
+def save_pending_master(conn: sqlite3.Connection, info: MasterInfo, summary: dict, resume_json: str = "") -> None:
+    put(conn, "pending_master", {"info": info.model_dump(), "summary": summary, "resume_json": resume_json})
+
+
+def save_master_read(conn: sqlite3.Connection, sha: str, resume_json: str) -> None:
+    """The read the user confirmed: `load_master_with_sha` serves it for this file's hash before the
+    cache, so a cache wipe or parser change never triggers a fresh (unseen) AI read."""
+    put(conn, "master_read", {"sha": sha, "resume_json": resume_json})
 
 
 def clear_pending_master(conn: sqlite3.Connection) -> None:
