@@ -31,21 +31,12 @@ Paste each command below into it and press Return.
 
 3. Close the Terminal window and open a new one. This lets it find uv.
 
-4. Download the app. The repository is private, so GitHub has to know who you are.
-   You need to accept Georgia's invite to the repo first (check your email from GitHub).
-   - Install GitHub's command-line tool: go to https://cli.github.com, download the macOS installer and open it.
-   - Sign in. Choose GitHub.com, HTTPS, and "Login with a web browser", then follow the code shown:
+4. Download the app and go into its folder. No GitHub account is needed.
 
-     ```
-     gh auth login
-     ```
-
-   - Download the app and go into its folder:
-
-     ```
-     gh repo clone georgia-max/jobhunt
-     cd jobhunt
-     ```
+   ```
+   git clone https://github.com/damonforex122-bit/jobhunt.git
+   cd jobhunt
+   ```
 
 5. Install what the app needs.
 
@@ -151,14 +142,15 @@ Use the menu at the top of the page.
 - **Jobs.** Your list of openings. To add one, paste a link in **Add a job by link** and press
   **Add and tailor**. Open a job to press **Grade** (a fit score from 1 to 10, with reasons) or
   **Tailor resume**. Use the status dropdown to move it along, with an optional note.
-  A job's page keeps the history of its status changes.
+  A job's page keeps the history of its status changes. Tick **New today** to see only jobs added today.
 - **Review.** On a job with a tailored resume, press **Review & refine**. Chat to ask for changes
   ("make the first bullet shorter") or press **Tailor now**. Every change is checked against your original
   resume so nothing is invented.
 - **Pipeline.** A board of your applications. Drag a card to change its stage. The stages are
   applied, screening, interviewing and offer, then accepted, rejected or withdrawn at the end.
   With Gmail connected, press **Sync Gmail**. Suggested moves appear at the top with **Accept** and **Dismiss**.
-  Nothing changes until you accept.
+  Nothing changes until you accept. The top of the board sums up today: new jobs by source, moves,
+  upcoming interviews, when the morning run last ran, and a link to today's Proficiently digest if there is one.
 - **Interviews.** Interviews found in your email, in one place.
 - **Companies.** The careers pages you watch. Press **Scan now** to look for new jobs.
 - **Profile.** Change your resume, links, preferences, notes, output folder and keys at any time.
@@ -244,6 +236,7 @@ launchctl kickstart -k gui/$(id -u)/com.jobhunt.daily
 uv run jobhunt daily --status
 ```
 
+When `PROFICIENTLY_DIR` is set, the run starts with the Proficiently import; otherwise that step is skipped.
 `uv run jobhunt daily --uninstall` removes the schedule. The log is `data/daily.log`.
 This is the one place the app calls the AI without you pressing a button, so it uses your key every morning.
 If a step says "permission denied", macOS is blocking background access to `~/Documents`. Allow Full Disk Access for
@@ -276,8 +269,13 @@ uv run jobhunt import
 ```
 
 This loads your earlier jobs (with their status and score), their companies and the people Proficiently found.
-Postings and files Proficiently prepared show on each job's page. Until you save preferences on the Profile page,
-the app reads them from this folder.
+Postings and files Proficiently prepared show on each job's page, and warm intros show in its people list with a
+**warm intro** badge. Greenhouse, Ashby and Lever careers pages from `company-careers.json` become watched companies
+(a company you already watch keeps its page). Daily digests from `daily-digest/` are imported once each and linked
+from the Pipeline page. Until you save preferences on the Profile page, the app reads them from this folder.
+
+The import is safe to run again. It adds new jobs and updates scores, but it only moves a job that is still new or
+untriaged: a job you have already applied to, or moved along yourself, keeps its status.
 
 ### Moving over from the original install
 
