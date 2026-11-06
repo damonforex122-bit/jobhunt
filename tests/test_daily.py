@@ -251,3 +251,12 @@ def test_grade_retries_failed_fits_but_skips_real_grades(conn, tmp_path, monkeyp
     monkeypatch.setattr("jobhunt.fit.grade_job", fake)
     out = _grade_step()(conn, _settings(tmp_path, gemini_api_key="k"))
     assert sorted(called) == sorted([b, c, d]) and out == {"graded": 3, "failed": 0}
+
+
+def test_gmail_steps_skip_without_any_gmail_connection(conn, tmp_path):
+    s = _settings(tmp_path, gmail_token=tmp_path / "no-token.json", gmail_address=None, gmail_app_password=None)
+    steps = dict(_REAL_STEPS())
+    results = daily.run_daily(conn, s, [("gmail", steps["gmail"]), ("interviews", steps["interviews"])])
+    for r in results:
+        assert r["status"] == "skipped"
+        assert r["error"] == "skipped: Gmail not connected — connect it on the Setup page"

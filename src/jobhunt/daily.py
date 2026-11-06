@@ -40,15 +40,27 @@ def _step_scan(conn, settings) -> dict:
     return _counts(run_scan(conn, settings))
 
 
+GMAIL_NOT_CONNECTED = "Gmail not connected — connect it on the Setup page"
+
+
+def _require_gmail(settings) -> None:
+    from .gmail.connect import gmail_connected
+
+    if not gmail_connected(settings):  # neither an app password nor an OAuth token
+        raise StepSkipped(GMAIL_NOT_CONNECTED)
+
+
 def _step_gmail(conn, settings) -> dict:
     from .gmail.sync import run_sync
 
+    _require_gmail(settings)
     return _counts(run_sync(conn, settings))
 
 
 def _step_interviews(conn, settings) -> dict:
     from .gmail.interviews import run_interview_sync
 
+    _require_gmail(settings)
     return {"synced": run_interview_sync(conn, settings)}
 
 
